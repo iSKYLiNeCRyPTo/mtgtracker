@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TEAL   = "#00D4AA";
@@ -270,11 +271,11 @@ function NewDeckModal({ onSave, onClose }) {
     setSearching(false);
   };
 
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", zIndex:1000,
+  return createPortal(
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", zIndex:10000,
       display:"flex", alignItems:"flex-end" }} onClick={onClose}>
       <div style={{ background:"#141414", borderRadius:"20px 20px 0 0", width:"100%",
-        padding:"20px 20px", paddingBottom:"calc(24px + env(safe-area-inset-bottom, 0px))", maxHeight:"90vh", overflowY:"auto" }}
+        padding:"20px 20px", paddingBottom:"calc(32px + env(safe-area-inset-bottom, 0px))", maxHeight:"90vh", overflowY:"auto" }}
         onClick={e => e.stopPropagation()}>
 
         <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff",
@@ -365,7 +366,8 @@ function NewDeckModal({ onSave, onClose }) {
           Create Deck
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
