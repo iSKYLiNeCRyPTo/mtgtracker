@@ -3826,7 +3826,8 @@ function genPrices(cardOrId) {
 }
 
 // ── Web price cache (persistent, so repeat scans don't re-fetch) ─────────────
-const WEB_PRICE_CACHE_KEY = "mtg_price_cache_v1";
+const WEB_PRICE_CACHE_KEY    = "mtg_price_cache_v1";
+const PRICES_REFRESHED_KEY   = "prices-last-refreshed";
 const WEB_PRICE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function getWebPriceCache() {
@@ -9242,7 +9243,7 @@ function App() {
 
     setCol([...updated]);
     await saveCollection(updated);
-    try { localStorage.removeItem("prices-last-refreshed"); } catch(_e) {}
+    try { localStorage.removeItem(PRICES_REFRESHED_KEY); } catch(_e) {}
     setRefreshing(false);
   };
 
