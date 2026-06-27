@@ -1,6 +1,6 @@
 import DesktopSidebar, { SyncButton } from "./Sidebar.jsx";
 import DecksView from "./DecksView.jsx";
-import { computeAutoTags, getTagMeta, TagChip, TAG_FILTER_GROUPS, HIDDEN_BY_DEFAULT_CATS } from "./cardTags.js";
+import { computeAutoTags, getTagMeta, TagChip, TAG_FILTER_GROUPS, HIDDEN_BY_DEFAULT_CATS } from "./cardTags.jsx";
 import QRCode from "qrcode";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -9222,8 +9222,6 @@ function App() {
     let lastUiUpdate = Date.now();
     const UPDATE_INTERVAL = 400; // ms — throttle re-renders during bulk refresh
 
-    const UPDATE_INTERVAL = 400;
-
     // Fetch all prices in parallel from Scryfall
     await Promise.all(updated.map(async (item, i) => {
       try {
@@ -9246,8 +9244,6 @@ function App() {
     await saveCollection(updated);
     try { localStorage.removeItem("prices-last-refreshed"); } catch(_e) {}
     setRefreshing(false);
-  };
-
   };
 
   // ── Box / Pack handlers ───────────────────────────────────────────────────
