@@ -271,10 +271,10 @@ function NewDeckModal({ onSave, onClose }) {
   };
 
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", zIndex:200,
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", zIndex:1000,
       display:"flex", alignItems:"flex-end" }} onClick={onClose}>
       <div style={{ background:"#141414", borderRadius:"20px 20px 0 0", width:"100%",
-        padding:"20px 20px 40px", maxHeight:"90vh", overflowY:"auto" }}
+        padding:"20px 20px", paddingBottom:"calc(24px + env(safe-area-inset-bottom, 0px))", maxHeight:"90vh", overflowY:"auto" }}
         onClick={e => e.stopPropagation()}>
 
         <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff",

@@ -70,6 +70,20 @@ const PRODUCT_TYPES = [
 ];
 
 
+// Maps product type id → allowed Scryfall set_type values (null = show all)
+const PRODUCT_SET_TYPES = {
+  draft_booster_box:     ["core","expansion","masters","draft_innovation","funny"],
+  set_booster_box:       ["core","expansion","masters"],
+  collector_booster_box: ["core","expansion","masters"],
+  bundle:                ["core","expansion"],
+  commander_deck:        ["commander","commander_deck"],
+  prerelease_kit:        ["core","expansion"],
+  jumpstart_pack:        ["draft_innovation","core","expansion"],
+  single_pack:           null,
+  collector_booster:     ["core","expansion","masters"],
+  draft_booster:         ["core","expansion","masters","draft_innovation"],
+};
+
 // ── MTG Sealed Product UPC Map ────────────────────────────────────────────────
 // Format: UPC → { name, setName, setCode, productType, totalPacks, cardsPerPack }
 // productType must match PRODUCT_TYPES ids
@@ -124,7 +138,7 @@ const MTG_MAIN_SET_TYPES = ["core","expansion","masters","draft_innovation","fun
 // Set types shown under "Other" or filtered out
 const MTG_EXCLUDED_SET_TERMS = [
   "alchemy", "masterpiece", "from_the_vault", "spellbook", "premium_deck",
-  "duel_deck", "commander_deck", "planechase", "archenemy", "vanguard",
+  "duel_deck", "planechase", "archenemy", "vanguard",
   "treasure_chest", "memorabilia", "token", "minigame",
 ];
 
@@ -153,10 +167,10 @@ async function scryfallFetch(path) {
 }
 
 async function fetchAllSetsCached() {
-  const cached = await getCachedSetCards("__all_sets_mtg_v1__");
+  const cached = await getCachedSetCards("__all_sets_mtg_v2__");
   if (cached?.length) return cached;
   const sets = await fetchAllSets();
-  if (sets?.length) cacheSetCards("__all_sets_mtg_v1__", sets).catch(() => {});
+  if (sets?.length) cacheSetCards("__all_sets_mtg_v2__", sets).catch(() => {});
   return sets;
 }
 
@@ -1660,6 +1674,7 @@ function NewBoxForm({ onSave, onCancel }) {
   const [scanning,   setScanning]   = useState(false);
   const [scanErr,    setScanErr]    = useState("");
   const [scannedProduct, setScannedProduct] = useState(null); // matched UPC result
+  const [setArts, setSetArts] = useState({});
   const barcodeVideoRef = useRef(null);
   const barcodeStreamRef = useRef(null);
   const barcodeLoopRef  = useRef(null);
@@ -1840,10 +1855,30 @@ function NewBoxForm({ onSave, onCancel }) {
     });
   };
 
-  const filteredSets = sets.filter(s =>
-    s.name.toLowerCase().includes(setSearch.toLowerCase()) ||
-    s.series?.toLowerCase().includes(setSearch.toLowerCase())
-  );
+  const allowedSetTypes = productType ? PRODUCT_SET_TYPES[productType.id] : null;
+  const filteredSets = sets.filter(s => {
+    if (allowedSetTypes && !allowedSetTypes.includes(s._setType)) return false;
+    if (!setSearch) return true;
+    const q = setSearch.toLowerCase();
+    return s.name.toLowerCase().includes(q) || s.series?.toLowerCase().includes(q);
+  });
+
+  // Fetch card art for currently visible sets (lazy, cached via scryfallFetch)
+  useEffect(() => {
+    if (step !== "set") return;
+    let cancelled = false;
+    const toFetch = filteredSets.slice(0, 30).filter(s => !setArts[s.id]);
+    toFetch.forEach(async s => {
+      try {
+        const res = await scryfallFetch(`/cards/search?q=set:${s.id}+order:edhrec&unique=art&page=1`);
+        const card = res?.data?.[0];
+        const art = card?.image_uris?.art_crop || card?.card_faces?.[0]?.image_uris?.art_crop;
+        if (art && !cancelled) setSetArts(prev => ({ ...prev, [s.id]: art }));
+      } catch {}
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, filteredSets.map(s=>s.id).join(",")]);
 
   // Group sets by series
   const grouped = filteredSets.reduce((acc, s) => {
@@ -2024,7 +2059,7 @@ function NewBoxForm({ onSave, onCancel }) {
             ) : (
               Object.entries(grouped).map(([series, seriesSets]) => (
                 <div key={series} style={{ marginBottom:16 }}>
-                  <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:6 }}>{series.toUpperCase()}</div>
+                  <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:6 }}>{series.replace(/_/g," ").toUpperCase()}</div>
                   {seriesSets.map(s => (
                     <button key={s.id} onClick={()=>selectSet(s)} style={{
                       width:"100%", background:CARD, border:`1px solid ${BORDER}`,
@@ -2035,24 +2070,23 @@ function NewBoxForm({ onSave, onCancel }) {
                       onMouseEnter={e=>e.currentTarget.style.borderColor=TEAL+"44"}
                       onMouseLeave={e=>e.currentTarget.style.borderColor=BORDER}
                     >
-                      {/* Logo or symbol */}
-                      <div style={{ width:52, height:36, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
-                        background:"#0d0d0d", borderRadius:8, overflow:"hidden", padding:4 }}>
-                        {s.images?.logo
-                          ? <img src={s.images.logo} alt={s.name}
-                              style={{ maxHeight:28, maxWidth:44, objectFit:"contain" }}
-                              onError={e=>{ e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }}
-                            />
-                          : null}
-                        {s.images?.symbol && !s.images?.logo
-                          ? <img src={s.images.symbol} alt=""
-                              style={{ height:24, width:24, objectFit:"contain" }}
-                              onError={e=>{ e.target.style.display="none"; }}
-                            />
-                          : null}
-                        <span style={{ display:"none", color:"#555", fontSize:9, fontWeight:700, letterSpacing:0.5, textAlign:"center" }}>
-                          {(s.ptcgoCode || s.id || "").slice(0,4).toUpperCase()}
-                        </span>
+                      {/* Card art or fallback symbol */}
+                      <div style={{ width:52, height:36, flexShrink:0, position:"relative",
+                        background:"#0d0d0d", borderRadius:8, overflow:"hidden" }}>
+                        {setArts[s.id]
+                          ? <img src={setArts[s.id]} alt={s.name}
+                              style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                          : s.images?.logo
+                            ? <img src={s.images.logo} alt={s.name}
+                                style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)",
+                                  maxHeight:28, maxWidth:44, objectFit:"contain", filter:"brightness(0) invert(0.7)" }}
+                                onError={e=>{ e.target.style.display="none"; }}
+                              />
+                            : <span style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)",
+                                color:"#444", fontSize:9, fontWeight:700, letterSpacing:0.5, textAlign:"center", whiteSpace:"nowrap" }}>
+                                {(s.id || "").slice(0,4).toUpperCase()}
+                              </span>
+                        }
                       </div>
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ color:"#fff", fontSize:13, fontWeight:600 }}>{s.name}</div>
