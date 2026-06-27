@@ -11,3 +11,4 @@ pipeline/all_cards.json
 pipeline/global_embeddings*.bin
 pipeline/cards_meta.json
 *.bak
+.env
