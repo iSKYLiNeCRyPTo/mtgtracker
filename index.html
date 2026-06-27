@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="MTGTracker" />
+  <link rel="apple-touch-icon" href="/icon-180.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>MTGTracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html { background:#0a0a0a; }
+    body {
+      background:#0a0a0a;
+      color:#fff;
+      font-family:'DM Sans',sans-serif;
+      -webkit-font-smoothing:antialiased;
+      /* This is the magic — fill exactly the visible screen */
+      min-height: 100svh;
+      display: flex;
+      flex-direction: column;
+    }
+    #root {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    input,button,textarea,select { font-family:inherit; }
+    input::placeholder,textarea::placeholder { color:#444; }
+    ::-webkit-scrollbar { width:3px; }
+    ::-webkit-scrollbar-track { background:#0a0a0a; }
+    ::-webkit-scrollbar-thumb { background:#222; border-radius:2px; }
+    @keyframes spin    { to { transform:rotate(360deg); } }
+    @keyframes fadeUp  { from { opacity:0;transform:translateY(10px); } to { opacity:1;transform:none; } }
+    @keyframes slideUp { from { opacity:0;transform:translateY(40px); } to { opacity:1;transform:none; } }
+    @media (min-width:768px) {
+      .sidebar { display:flex !important; flex-direction:column; width:220px; background:#0d0d0d; border-right:1px solid #1e1e1e; padding:24px 0 32px; flex-shrink:0; }
+      .mob-nav  { display:none !important; }
+      .card-grid { grid-template-columns:repeat(3,1fr) !important; }
+      .card-grid-search { grid-template-columns:repeat(4,1fr) !important; }
+    }
+    @media (min-width:1200px) {
+      .sidebar { width:240px; }
+      .card-grid { grid-template-columns:repeat(4,1fr) !important; }
+      .card-grid-search { grid-template-columns:repeat(5,1fr) !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    if('serviceWorker' in navigator){
+      window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+    }
+  </script>
+</body>
+</html>

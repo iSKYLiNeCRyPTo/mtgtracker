@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+pipeline/embedding_cache/
+pipeline/crop_cache/
+pipeline/checkpoint*.json
+pipeline/all_cards.json
+pipeline/global_embeddings*.bin
+pipeline/cards_meta.json
+*.bak

@@ -1,0 +1,16 @@
+{
+  "name": "MTGTracker",
+  "short_name": "MTGTracker",
+  "description": "Magic: The Gathering card investment tracker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00D4AA",
+  "icons": [
+    {
+      "src": "/icon-180.svg",
+      "sizes": "180x180",
+      "type": "image/svg+xml"
+    }
+  ]
+}
