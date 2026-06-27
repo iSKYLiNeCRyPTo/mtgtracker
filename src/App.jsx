@@ -3826,7 +3826,8 @@ function genPrices(cardOrId) {
 }
 
 // ── Web price cache (persistent, so repeat scans don't re-fetch) ─────────────
-const WEB_PRICE_CACHE_KEY = "mtg_price_cache_v1";
+const WEB_PRICE_CACHE_KEY    = "mtg_price_cache_v1";
+const PRICES_REFRESHED_KEY   = "prices-last-refreshed";
 const WEB_PRICE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function getWebPriceCache() {
@@ -4242,6 +4243,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
   const [showVal,      setShowVal]      = useState(true);
   const [newSets,      setNewSets]      = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [homeDecks,    setHomeDecks]    = useState([]);
 
   const activeCollection = collection.filter(i => !i.sold);
   const total    = activeCollection.reduce((s,i) => s + (genPrices(i.card).raw[i.condition] || 0), 0);
@@ -4255,30 +4257,40 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
   // Hardcoded ME sets not yet in the pokemontcg API
   // MTG sets come entirely from Scryfall — no seed needed
 
-  // Fetch recent sets from Scryfall
+  // Fetch recent sets from Scryfall, then fetch one card art per set
   useEffect(() => {
-    const cached = sessionStorage.getItem("home_sets_mtg_v1");
+    const cached = sessionStorage.getItem("home_sets_mtg_v2");
     if (cached) { try { setNewSets(JSON.parse(cached)); return; } catch(_e) {} }
-    scryfallFetch("/sets?order=released&direction=desc").then(data => {
-      const sets = (data?.data || [])
+    scryfallFetch("/sets?order=released&direction=desc").then(async data => {
+      const raw = (data?.data || [])
         .filter(s => !s.digital && s.card_count >= 10 && s.released_at && !["token","memorabilia"].includes(s.set_type))
         .slice(0, 6)
-        .map(s => ({ id:s.code, name:s.name, logo:s.icon_svg_uri, symbol:s.icon_svg_uri,
+        .map(s => ({ id:s.code, name:s.name, symbol:s.icon_svg_uri,
           releaseDate:s.released_at, total:s.card_count, series:s.set_type }));
+      // Fetch one card art per set in parallel (take first result, high EDHRec rank)
+      const sets = await Promise.all(raw.map(async s => {
+        try {
+          const res = await scryfallFetch(`/cards/search?q=set:${s.id}+order:edhrec&unique=art&page=1`);
+          const card = res?.data?.[0];
+          return { ...s, image: card?.image_uris?.art_crop || card?.card_faces?.[0]?.image_uris?.art_crop || null };
+        } catch { return s; }
+      }));
       setNewSets(sets);
-      sessionStorage.setItem("home_sets_mtg_v1", JSON.stringify(sets));
+      sessionStorage.setItem("home_sets_mtg_v2", JSON.stringify(sets));
     }).catch(() => {});
   }, []);
 
-  // eBay auction links — singles and sealed only
-  const ebayLinks = [
-    { label:"Mythic Rares", q:"magic the gathering mythic rare",          sort:"1" },
-    { label:"Sealed Ending Soon",         q:"magic the gathering booster pack sealed",                sort:"1" },
-    { label:"Bloomburrow",           q:"bloomburrow magic the gathering",              sort:"1" },
-    { label:"Modern Horizons 3",               q:"modern horizons 3 magic the gathering",        sort:"1" },
-    { label:"Duskmourn",              q:"duskmourn magic the gathering",       sort:"1" },
-    { label:"Bulk Lots",                  q:"magic the gathering card lot bulk singles",              sort:"1" },
-  ];
+  // Load decks from localStorage for the Best Decks widget
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("mtg-decks-v1") || "[]");
+      const sorted = [...raw].sort((a, b) => {
+        const val = d => (d.cards||[]).reduce((s,c)=>s+((c.foil?c.card?.prices?.usd_foil:c.card?.prices?.usd)||c.card?.prices?.usd||0)*(c.qty||1),0);
+        return val(b) - val(a);
+      });
+      setHomeDecks(sorted.slice(0, 4));
+    } catch { setHomeDecks([]); }
+  }, []);
 
   return (
     <div style={{ height:"100%", overflowY:"auto", display:"flex", flexDirection:"column" }}>
@@ -4448,7 +4460,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
         <div style={{ display:"flex", gap:10, overflowX:"auto", padding:"0 20px 4px",
           scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
           {newSets.length === 0 && [1,2,3,4].map(i => (
-            <div key={i} style={{ flexShrink:0, width:120, height:80, background:CARD,
+            <div key={i} style={{ flexShrink:0, width:130, height:100, background:CARD,
               borderRadius:12, border:`1px solid ${BORDER}` }}/>
           ))}
           {newSets.map(set => {
@@ -4458,18 +4470,25 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
             const thirtyAgo = new Date(Date.now()-30*864e5).toISOString().slice(0,10);
             const isNew = !isUpcoming && relDate >= thirtyAgo;
             return (
-              <div key={set.id} onClick={() => {
-                  const url = `https://scryfall.com/sets/${set.id}`;
-                  window.open(url, "_blank");
-                }}
+              <div key={set.id} onClick={() => window.open(`https://scryfall.com/sets/${set.id}`, "_blank")}
                 style={{ flexShrink:0, width:130, background:CARD, border:`1px solid ${isNew?TEAL+"44":BORDER}`,
-                  borderRadius:12, padding:"10px 12px", cursor:"pointer", position:"relative" }}>
-                {set.logo
-                  ? <img src={set.logo} alt={set.name} style={{ width:"100%", height:36, objectFit:"contain", marginBottom:6 }}/>
-                  : <div style={{ height:36, marginBottom:6, display:"flex", alignItems:"center" }}>
-                      <span style={{ color:"#fff", fontSize:11, fontWeight:600, lineHeight:1.2 }}>{set.name}</span>
-                    </div>}
-                <div style={{ color:"#555", fontSize:9 }}>{set.releaseDate}</div>
+                  borderRadius:12, overflow:"hidden", cursor:"pointer", position:"relative" }}>
+                {/* Card art banner */}
+                <div style={{ width:"100%", height:72, background:"#1a1a1a", overflow:"hidden", position:"relative" }}>
+                  {set.image
+                    ? <img src={set.image} alt={set.name} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                    : set.symbol
+                      ? <img src={set.symbol} alt={set.name} style={{ width:36, height:36, objectFit:"contain",
+                          position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)",
+                          filter:"brightness(0) invert(0.3)" }}/>
+                      : null}
+                </div>
+                {/* Name + date */}
+                <div style={{ padding:"6px 8px 8px" }}>
+                  <div style={{ color:"#fff", fontSize:10, fontWeight:600, lineHeight:1.2,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{set.name}</div>
+                  <div style={{ color:"#555", fontSize:9, marginTop:2 }}>{set.releaseDate}</div>
+                </div>
                 {(isNew || isUpcoming) && (
                   <div style={{ position:"absolute", top:6, right:6, background: isUpcoming?"#7c3aed":TEAL,
                     borderRadius:4, padding:"1px 5px", fontSize:8, color: isUpcoming?"#fff":"#000", fontWeight:700 }}>
@@ -4482,30 +4501,52 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
         </div>
       </div>
 
-      {/* eBay — Ending Soon */}
+      {/* Best Decks */}
       <div style={{ margin:"16px 20px 0" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-          <div style={{ fontWeight:700, fontSize:15, color:"#fff" }}>eBay — Browse</div>
-          <span style={{ color:"#555", fontSize:11 }}>Opens eBay</span>
+          <div style={{ fontWeight:700, fontSize:15, color:"#fff" }}>Best Decks</div>
+          <span onClick={() => setTabFromHome("decks")}
+            style={{ color:TEAL, fontSize:11, cursor:"pointer" }}>See all →</span>
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-          {ebayLinks.map(({ label, q, sort }) => (
-            <button key={label} onClick={() => {
-                const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q)}&LH_Auction=1&_sop=${sort}&LH_ItemCondition=3000`;
-                window.open(url, "_blank");
-              }}
-              style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12, padding:"10px 12px",
-                textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}>
-              <div style={{ color:"#fff", fontSize:12, fontWeight:600 }}>{label}</div>
-              <div style={{ color:TEAL, fontSize:10, marginTop:2, display:"flex", alignItems:"center", gap:3 }}>
-                Auctions
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={TEAL} strokeWidth="2.5">
-                  <path d="M7 17L17 7M7 7h10v10"/>
-                </svg>
-              </div>
-            </button>
-          ))}
-        </div>
+        {homeDecks.length === 0
+          ? <div onClick={() => setTabFromHome("decks")}
+              style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12,
+                padding:"18px 16px", textAlign:"center", cursor:"pointer" }}>
+              <div style={{ color:"#555", fontSize:13 }}>No decks yet</div>
+              <div style={{ color:TEAL, fontSize:12, marginTop:4 }}>Build your first deck →</div>
+            </div>
+          : <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {homeDecks.map(deck => {
+                const value = (deck.cards||[]).reduce((s,c)=>s+((+(c.foil?c.card?.prices?.usd_foil:null)||+c.card?.prices?.usd||0)*(c.qty||1)),0);
+                const wins   = deck.record?.wins   || 0;
+                const losses = deck.record?.losses || 0;
+                const games  = wins + losses + (deck.record?.draws||0);
+                const winPct = games > 0 ? Math.round((wins/games)*100) : null;
+                const col = { commander:"#a855f7", modern:"#f59e0b", standard:"#3b82f6",
+                  pioneer:"#06b6d4", legacy:"#ef4444", vintage:"#f97316",
+                  pauper:"#6b7280", brawl:"#8b5cf6", draft:"#10b981", casual:"#6b7280",
+                  oathbreaker:"#ec4899" }[deck.format] || "#6b7280";
+                return (
+                  <button key={deck.id} onClick={() => setTabFromHome("decks")}
+                    style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12,
+                      padding:"10px 12px", textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}>
+                    <div style={{ color:"#fff", fontSize:12, fontWeight:700,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{deck.name}</div>
+                    <div style={{ color:col, fontSize:9, marginTop:2, textTransform:"uppercase",
+                      letterSpacing:0.5 }}>{deck.format}</div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6 }}>
+                      <div style={{ color:TEAL, fontSize:12, fontWeight:700 }}>
+                        {value > 0 ? `$${value >= 1000 ? (value/1000).toFixed(1)+"k" : value.toFixed(0)}` : "—"}
+                      </div>
+                      {winPct !== null
+                        ? <div style={{ color:"#888", fontSize:9 }}>{wins}–{losses} ({winPct}%)</div>
+                        : <div style={{ color:"#444", fontSize:9 }}>{(deck.cards||[]).reduce((s,c)=>s+(c.qty||1),0)} cards</div>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+        }
       </div>
 
       {/* Most Valuable */}
@@ -5303,7 +5344,7 @@ function SearchView({ onCardPress, onAdd }) {
             onKeyDown={e => e.key === "Enter" && doSearch(q)}
             placeholder={cardsMeta && Object.keys(cardsMeta).length > 0
               ? `Search ${Object.keys(cardsMeta).length.toLocaleString()} cards instantly...`
-              : "Search Pokémon cards..."}
+              : "Search Magic cards..."}
             style={{ width:"100%", padding:"11px 12px 11px 36px", background:CARD,
               border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
               fontSize:16, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
@@ -9242,7 +9283,7 @@ function App() {
 
     setCol([...updated]);
     await saveCollection(updated);
-    try { localStorage.removeItem("prices-last-refreshed"); } catch(_e) {}
+    try { localStorage.removeItem(PRICES_REFRESHED_KEY); } catch(_e) {}
     setRefreshing(false);
   };
 
