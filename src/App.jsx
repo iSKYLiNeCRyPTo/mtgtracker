@@ -10,7 +10,7 @@ import {
   cacheGroups, getCachedGroups,
 } from "./cache.js";
 import {
-  isFirebaseConfigured, signInWithGoogle, signOutUser, onAuthChange, getCurrentUser,
+  isFirebaseConfigured, signInWithGoogle, signOutUser, onAuthChange, getCurrentUser, handleRedirectResult,
   saveCollectionToFirestore, loadCollectionFromFirestore,
   saveBoxesToFirestore, loadBoxesFromFirestore,
   saveEmbeddingsToFirestore, loadEmbeddingsFromFirestore,
@@ -9063,6 +9063,8 @@ function App() {
   // ── Firebase auth + real-time sync ─────────────────────────────────────────
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
+    // Complete any pending redirect sign-in (mobile flow)
+    handleRedirectResult().catch(() => {});
     const unsub = onAuthChange(async (user) => {
       setFbUser(user);
       if (user) {

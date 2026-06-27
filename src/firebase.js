@@ -1,8 +1,8 @@
 // firebase.js — Firebase/Firestore integration for MTGTracker
 import { initializeApp }              from "firebase/app";
 import { getAuth, GoogleAuthProvider,
-         signInWithPopup, signOut,
-         onAuthStateChanged }         from "firebase/auth";
+         signInWithPopup, signInWithRedirect, getRedirectResult,
+         signOut, onAuthStateChanged }         from "firebase/auth";
 import { getFirestore, doc, setDoc,
          getDoc, collection as coll, getDocs,
          onSnapshot, writeBatch,
@@ -37,15 +37,44 @@ function init() {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
+// On iOS Safari and standalone PWA, signInWithPopup is blocked.
+// Use redirect-based flow on mobile; popup on desktop.
+function isMobileBrowser() {
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod|Android/i.test(ua) ||
+    (navigator.standalone === true) || // iOS PWA
+    window.matchMedia("(display-mode: standalone)").matches; // Android PWA
+}
+
 export async function signInWithGoogle() {
   init();
   if (!auth) return null;
   const provider = new GoogleAuthProvider();
+  if (isMobileBrowser()) {
+    // Redirect flow — result handled in handleRedirectResult() on next page load
+    try { await signInWithRedirect(auth, provider); } catch (e) {
+      console.error("[Firebase] Redirect sign in failed:", e);
+    }
+    return null; // page will redirect away
+  }
   try {
     const result = await signInWithPopup(auth, provider);
     return result.user;
   } catch (e) {
     console.error("[Firebase] Sign in failed:", e);
+    return null;
+  }
+}
+
+// Call once on app startup to complete a pending redirect sign-in
+export async function handleRedirectResult() {
+  init();
+  if (!auth) return null;
+  try {
+    const result = await getRedirectResult(auth);
+    return result?.user || null;
+  } catch (e) {
+    console.error("[Firebase] Redirect result failed:", e);
     return null;
   }
 }
