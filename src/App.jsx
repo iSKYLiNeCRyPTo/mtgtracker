@@ -2040,13 +2040,13 @@ function NewBoxForm({ onSave, onCancel }) {
                         background:"#0d0d0d", borderRadius:8, overflow:"hidden", padding:4 }}>
                         {s.images?.logo
                           ? <img src={s.images.logo} alt={s.name}
-                              style={{ maxHeight:28, maxWidth:44, objectFit:"contain" }}
+                              style={{ maxHeight:28, maxWidth:44, objectFit:"contain", filter:"brightness(0) invert(0.7)" }}
                               onError={e=>{ e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }}
                             />
                           : null}
                         {s.images?.symbol && !s.images?.logo
                           ? <img src={s.images.symbol} alt=""
-                              style={{ height:24, width:24, objectFit:"contain" }}
+                              style={{ height:24, width:24, objectFit:"contain", filter:"brightness(0) invert(0.7)" }}
                               onError={e=>{ e.target.style.display="none"; }}
                             />
                           : null}
