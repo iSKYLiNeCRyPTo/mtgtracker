@@ -4278,11 +4278,17 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
 
   // Fetch recent sets from Scryfall, then fetch one card art per set
   useEffect(() => {
-    const cached = sessionStorage.getItem("home_sets_mtg_v2");
+    const cached = sessionStorage.getItem("home_sets_mtg_v3");
     if (cached) { try { setNewSets(JSON.parse(cached)); return; } catch(_e) {} }
     scryfallFetch("/sets?order=released&direction=desc").then(async data => {
+      const seenNames = new Set();
       const raw = (data?.data || [])
-        .filter(s => !s.digital && s.card_count >= 10 && s.released_at && !["token","memorabilia"].includes(s.set_type))
+        .filter(s => {
+          if (s.digital || s.card_count < 10 || !s.released_at || ["token","memorabilia"].includes(s.set_type)) return false;
+          if (seenNames.has(s.name)) return false;
+          seenNames.add(s.name);
+          return true;
+        })
         .slice(0, 6)
         .map(s => ({ id:s.code, name:s.name, symbol:s.icon_svg_uri,
           releaseDate:s.released_at, total:s.card_count, series:s.set_type }));
@@ -4295,7 +4301,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
         } catch { return s; }
       }));
       setNewSets(sets);
-      sessionStorage.setItem("home_sets_mtg_v2", JSON.stringify(sets));
+      sessionStorage.setItem("home_sets_mtg_v3", JSON.stringify(sets));
     }).catch(() => {});
   }, []);
 
