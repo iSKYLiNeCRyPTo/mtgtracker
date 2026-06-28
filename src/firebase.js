@@ -277,20 +277,18 @@ export async function getEmbeddingIndexMeta() {
   } catch { return DEFAULT_INDEX_META; }
 }
 
-export async function downloadEmbeddingIndex(storagePath) {
+/** Returns the public URL for a storage file (used by the worker to fetch directly) */
+export function buildStorageUrl(storagePath) {
   const bucket  = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket;
   const encoded = encodeURIComponent(storagePath);
-  // Try CF worker proxy first if configured (avoids CORS on large binary files)
   const cfWorker = import.meta.env.VITE_CF_WORKER || "";
-  if (cfWorker) {
-    try {
-      const resp = await fetch(`${cfWorker}/firebase-storage/${bucket}/${encoded}`);
-      if (resp.ok) return await resp.arrayBuffer();
-    } catch {}
-  }
-  // Direct Firebase Storage (works when bucket is public or auth token is present)
-  const direct = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encoded}?alt=media`;
-  const resp = await fetch(direct);
+  if (cfWorker) return `${cfWorker}/firebase-storage/${bucket}/${encoded}`;
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encoded}?alt=media`;
+}
+
+export async function downloadEmbeddingIndex(storagePath) {
+  const url  = buildStorageUrl(storagePath);
+  const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Storage fetch failed: ${resp.status}`);
   return await resp.arrayBuffer();
 }

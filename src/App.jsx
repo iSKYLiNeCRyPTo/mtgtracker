@@ -16,7 +16,7 @@ import {
   listenToUserData,
   mergeSharedPriceHistory, pushPriceSnapshotToShared,
   pushFingerprintToShared, loadSharedFingerprints,
-  getEmbeddingIndexMeta, downloadEmbeddingIndex, downloadCardsMeta,
+  getEmbeddingIndexMeta, buildStorageUrl, downloadCardsMeta,
   loadGlobalFingerprints, pushGlobalFingerprint,
 } from "./firebase.js";
 const TEAL   = "#00D4AA";
@@ -8961,33 +8961,14 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
           return;
         }
 
-        const cached = await idbGet("index-meta");
-        const needsUpdate = !cached || cached.version !== meta.version;
-
-        let buffer, metaData;
-        if (needsUpdate) {
-          setIndexStatus(meta.count > 0 ? `Downloading ${meta.count.toLocaleString()} card database...` : "Downloading card database...");
-          [buffer, metaData] = await Promise.all([
-            downloadEmbeddingIndex(meta.storagePath),
-            downloadCardsMeta(meta.metaPath),
-          ]);
-          // Best-effort cache — don't let storage quota errors kill the scanner
-          idbSet("index-buffer", buffer).catch(() => {});
-          idbSet("index-cards",  metaData).catch(() => {});
-          idbSet("index-meta",   { version: meta.version }).catch(() => {});
-        } else {
-          setIndexStatus("Restoring card database...");
-          [buffer, metaData] = await Promise.all([
-            idbGet("index-buffer"),
-            idbGet("index-cards"),
-          ]);
-        }
-
-        if (cancelled || !buffer) return;
+        // Fetch the lightweight cards-meta JSON (4MB) and fingerprints in the main thread.
+        // The heavy 102MB binary index is fetched INSIDE the worker to avoid OOM on iOS.
+        const metaData = await downloadCardsMeta(meta.metaPath);
+        if (cancelled) return;
         metaRef.current = metaData || {};
         setCardsMeta(metaData || {});
 
-        // Cache global fingerprints for 1 hour — re-fetching on every scanner open is slow
+        // Cache global fingerprints for 1 hour
         const FP_TTL = 60 * 60 * 1000;
         const cachedFp = await idbGet("global-fingerprints-cache");
         let fingerprints;
@@ -8995,8 +8976,12 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
           fingerprints = cachedFp.data;
         } else {
           fingerprints = await loadGlobalFingerprints().catch(() => ({}));
-          await idbSet("global-fingerprints-cache", { data: fingerprints, ts: Date.now() });
+          idbSet("global-fingerprints-cache", { data: fingerprints, ts: Date.now() }).catch(() => {});
         }
+
+        // Build the index URL — the worker will fetch and cache it internally
+        const indexUrl  = buildStorageUrl(meta.storagePath);
+        const indexVer  = meta.version;
 
         setIndexStatus("Initialising scanner...");
         const worker = new Worker(new URL("./embedWorker.js", import.meta.url), { type: "module" });
@@ -9049,7 +9034,9 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
           }
         };
 
-        worker.postMessage({ type: "loadGlobalIndex", buffer, fingerprints }, [buffer]);
+        // Pass the URL + version to the worker so it can fetch/cache the 102MB binary
+        // internally, avoiding loading it in the main thread (OOM on iOS Safari)
+        worker.postMessage({ type: "loadGlobalIndex", url: indexUrl, version: indexVer, fingerprints });
 
       } catch (err) {
         if (!cancelled) {
