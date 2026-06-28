@@ -1,7 +1,6 @@
-import DesktopSidebar, { SyncButton } from "./Sidebar.jsx";
+import DesktopSidebar from "./Sidebar.jsx";
 import DecksView from "./DecksView.jsx";
 import { computeAutoTags, getTagMeta, TagChip, TAG_FILTER_GROUPS, HIDDEN_BY_DEFAULT_CATS } from "./cardTags.jsx";
-import QRCode from "qrcode";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -3100,489 +3099,6 @@ function PacksView({ boxes, onNewBox, onBoxPress, onGroupPress, onDelete, onUpda
 }
 
 
-// ── Sync helpers ──────────────────────────────────────────────────────────────
-// Condition abbreviations for v4 compact format
-const COND_TO_SHORT = { poor:"po", good:"go", excellent:"ex", near_mint:"nm", near_mint:"nh", near_mint:"hf", near_mint:"rh" };
-const SHORT_TO_COND = { nm:"near_mint", lp:"lightly_played", mp:"moderately_played", hp:"heavily_played", dm:"damaged", po:"damaged", go:"lightly_played", ex:"moderately_played" };
-const ACQ_TO_SHORT  = { bought:"b", pack:"p", scan:"s", gift:"g" };
-const SHORT_TO_ACQ  = { b:"bought", p:"pack", s:"scan", g:"gift" };
-
-// v4 ultra-minimal format — card ID is all we need; images re-fetched on demand
-function minifyCollection(collection) {
-  return collection.map(item => ({
-    i: item.id,
-    c: COND_TO_SHORT[item.condition] || item.condition,
-    t: Math.floor((item.addedAt||Date.now()) / 1000), // seconds not ms
-    p: item.costPaid || undefined,
-    a: ACQ_TO_SHORT[item.acqType] || item.acqType || "b",
-    sd: item.sold || undefined,
-    sp: item.soldPrice || undefined,
-    bx: item.boxId || undefined,
-    k: item.card.id,
-    n: item.card.name,
-    s: item.card.set?.name || "",
-    si: item.card.set?.id || "",
-    // No images — re-fetched from pokemontcg.io using card id
-    // Cache price to avoid re-fetching
-    q: (() => { const p = item.card?.tcgplayer?.prices; if (!p) return undefined; const v = Object.values(p)[0]; return v?.market || v?.mid || undefined; })(),
-  }));
-}
-
-// Restore full item from v4 compact format
-function expandCollection(mini) {
-  return mini.map(i => {
-    // Card number: for id like "me3-92" the number is "92", for "sv6-28" it's "28"
-    const cardId = i.k || "";
-    const cardNum = cardId.split("-").slice(1).join("-") || ""; // everything after first segment
-
-    // Image is fetched fresh from Scryfall when the card is opened
-    const setId = i.si || "";
-    const imgUrl = ""; // re-fetched from Scryfall by card ID
-
-    return {
-      id: i.i || `${cardId}-${i.t || Date.now()}-imported`,
-      condition: SHORT_TO_COND[i.c] || i.c || "near_mint",
-      addedAt: ((i.t || 0)) * 1000,
-      costPaid: i.p != null ? parseFloat(i.p) : null,  // ensure number not string
-      acqType: SHORT_TO_ACQ[i.a] || i.a || "bought",
-      sold: i.sd || false,
-      soldAt: null,
-      soldPrice: i.sp != null ? parseFloat(i.sp) : null,
-      boxId: i.bx || null,
-      packName: null,
-      card: {
-        id: cardId,
-        name: i.n || cardId,
-        number: cardNum,
-        set: { id: setId, name: i.s || "" },
-        images: { small: imgUrl, large: imgUrl.replace(".png","_hires.png") },
-        tcgplayer: i.q ? { prices: { near_mint: {
-          market: parseFloat(i.q),
-          mid: parseFloat(i.q),
-          low: +(parseFloat(i.q) * 0.85).toFixed(2)
-        }}} : {},
-      }
-    };
-  });
-}
-
-async function exportToSyncCode(collection, boxes) {
-  const data = { c: minifyCollection(collection), b: boxes, t: Math.floor(Date.now()/1000), v: 4 };
-  const json = JSON.stringify(data);
-  try {
-    const bytes = new TextEncoder().encode(json);
-    let binary = "";
-    bytes.forEach(b => binary += String.fromCharCode(b));
-    const b64 = btoa(binary);
-    return { code: b64, method: "inline", data: { collection, boxes } };
-  } catch(_e) {}
-  return { code: null, method: "file", data: { collection, boxes } };
-}
-
-async function importFromSyncCode(raw) {
-  const s = raw.trim();
-  try {
-    const binary = atob(s);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const json = new TextDecoder().decode(bytes);
-    const data = JSON.parse(json);
-    if (data.v === 4 && data.c) return { collection: expandCollection(data.c), boxes: data.b || [] };
-    if (data.v === 3 && data.c) {
-      const collection = data.c.map(i => ({
-        id: i.id, condition: i.cond, addedAt: i.at, costPaid: i.cost, acqType: i.acq,
-        sold: i.sold||false, soldPrice: i.sp||null, soldAt: null,
-        card: { id: i.card.id, name: i.card.n, number: i.card.num,
-          set: { id: i.card.sid, name: i.card.set },
-          images: { small: i.card.img, large: i.card.img },
-          tcgplayer: i.card.tcg ? { prices: JSON.parse(i.card.tcg) } : {} }
-      }));
-      return { collection, boxes: data.b||[] };
-    }
-    if (data.collection) return data;
-  } catch(_e) {}
-  try { const data = JSON.parse(s); if (data.collection) return data; } catch(_e) {}
-  return null;
-}
-
-
-
-// ── Sync Modal ────────────────────────────────────────────────────────────────
-function SyncModal({ collection, boxes, onMerge, onClose, onEnrichCards }) {
-  const [tab, setTab]             = useState("export");
-  const [syncCode, setSyncCode]   = useState("");
-  const [qrDataUrl, setQrDataUrl] = useState(null); // null | string[] of URLs
-  const [qrIndex, setQrIndex]     = useState(0);
-  const [importCode, setImportCode] = useState("");
-  const [status, setStatus]       = useState("");
-  const [loading, setLoading]     = useState(false);
-  const [scanning, setScanning]   = useState(false);
-  const scanVideoRef  = useRef(null);
-  const scanStreamRef = useRef(null);
-  const scanCanvasRef = useRef(null);
-  const scanLoopRef   = useRef(null);
-
-  const stopScan = () => {
-    if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
-    if (scanStreamRef.current) scanStreamRef.current.getTracks().forEach(t => t.stop());
-    scanStreamRef.current = null;
-    setScanning(false);
-  };
-  useEffect(() => () => stopScan(), []);
-
-  const CHUNK_SIZE = 2900; // safe limit for QR binary mode (max 2953)
-
-  const handleExport = async () => {
-    setLoading(true); setStatus("");
-    try {
-      const result = await exportToSyncCode(collection, boxes);
-      if (result.code) {
-        setSyncCode(result.code);
-        // Split into chunks that fit in a QR code
-        const chunks = [];
-        for (let i = 0; i < result.code.length; i += CHUNK_SIZE) {
-          chunks.push(result.code.slice(i, i + CHUNK_SIZE));
-        }
-        const total = chunks.length;
-        const urls = await Promise.all(chunks.map(async (chunk, i) => {
-          // Prefix each chunk: "X/N:data" so scanner knows order
-          const payload = `PT${i+1}/${total}:${chunk}`;
-          return QRCode.toDataURL(payload, {
-            errorCorrectionLevel: "L", margin: 1, width: 300,
-            color: { dark: "#00D4AA", light: "#0a0a0a" },
-          });
-        }));
-        setQrDataUrl(urls); // array of URLs
-      } else {
-        const blob = new Blob([JSON.stringify(result.data, null, 2)], { type:"application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a"); a.href = url; a.download = "mtgtracker-backup.json"; a.click();
-        URL.revokeObjectURL(url);
-        setStatus("Downloaded backup file.");
-      }
-    } catch(e) { setStatus("Export failed: " + e.message); }
-    setLoading(false);
-  };
-
-  const downloadFile = () => {
-    const data = { c: minifyCollection(collection), b: boxes, t: Math.floor(Date.now()/1000), v: 4 };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "mtgtracker-backup.json"; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const startQrScan = async () => {
-    setScanning(true); setStatus("");
-    const chunks = {}; // index -> chunk data
-    let totalChunks = null;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      scanStreamRef.current = stream;
-      scanVideoRef.current.srcObject = stream;
-      await scanVideoRef.current.play();
-      const { default: jsQR } = await import("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js");
-      let lastSeen = "";
-      const loop = () => {
-        const v = scanVideoRef.current, c = scanCanvasRef.current;
-        if (!v || !c || v.readyState < 2) { scanLoopRef.current = requestAnimationFrame(loop); return; }
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        const ctx = c.getContext("2d");
-        ctx.drawImage(v, 0, 0);
-        const img = ctx.getImageData(0, 0, c.width, c.height);
-        const found = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
-        if (found?.data && found.data !== lastSeen) {
-          lastSeen = found.data;
-          const qrData = found.data;
-          // Check if multi-chunk format: "PTX/N:data"
-          const multiMatch = qrData.match(/^PT(\d+)\/(\d+):(.+)$/);
-          if (multiMatch) {
-            const idx = parseInt(multiMatch[1]);
-            const total = parseInt(multiMatch[2]);
-            const chunk = multiMatch[3];
-            totalChunks = total;
-            chunks[idx] = chunk;
-            const got = Object.keys(chunks).length;
-            setStatus(`Scanned ${got} of ${total} QR codes — ${got < total ? `show QR ${got+1}` : "processing..."}`);
-            if (got === total) {
-              // Reassemble
-              let fullCode = "";
-              for (let i = 1; i <= total; i++) fullCode += chunks[i];
-              stopScan();
-              setImportCode(fullCode);
-              setStatus(`All ${total} QR codes scanned! Tap Merge to import.`);
-              return;
-            }
-          } else {
-            // Single QR code (old format or small collection)
-            stopScan();
-            setImportCode(qrData);
-            setStatus("QR scanned! Tap Merge to import.");
-            return;
-          }
-        }
-        scanLoopRef.current = requestAnimationFrame(loop);
-      };
-      scanLoopRef.current = requestAnimationFrame(loop);
-    } catch(_e) { setStatus("Camera access denied."); setScanning(false); }
-  };
-
-  const handleImport = async () => {
-    if (!importCode.trim()) return;
-    setLoading(true); setStatus("");
-    try {
-      let data = null;
-
-      // Try raw JSON first (file upload)
-      try {
-        const parsed = JSON.parse(importCode.trim());
-        // v4 compact JSON file
-        if (parsed.v === 4 && parsed.c) {
-          data = { collection: expandCollection(parsed.c), boxes: parsed.b || [] };
-        }
-        // v3 compact
-        else if (parsed.v === 3 && parsed.c) {
-          data = await importFromSyncCode(importCode.trim());
-        }
-        // Full format (old backups)
-        else if (parsed.collection) {
-          data = parsed;
-        }
-      } catch(_e) {}
-
-      // Try base64 sync code
-      if (!data) data = await importFromSyncCode(importCode.trim());
-
-      if (!data || !data.collection) {
-        setStatus("Invalid code or file. Make sure it's a mtgtracker-backup.json file.");
-        setLoading(false); return;
-      }
-
-      // Dedup: skip cards that already exist with valid card data
-      const existingIds = new Set(
-        collection
-          .filter(i => i.card?.name && i.card.name.length > 0) // only count cards with real data
-          .map(i => i.card.id + "_" + i.condition)
-      );
-      const newCards = (data.collection||[]).filter(i => i.card?.id && !existingIds.has(i.card.id + "_" + i.condition));
-      const existingBoxIds = new Set(boxes.map(b => b.id));
-      const newBoxes = (data.boxes||[]).filter(b => !existingBoxIds.has(b.id));
-
-      if (newCards.length === 0 && newBoxes.length === 0) {
-        setStatus("Everything in this backup is already in your collection — nothing to merge.");
-        setLoading(false); return;
-      }
-
-      onMerge([...collection, ...newCards], [...boxes, ...newBoxes]);
-      setStatus(`✓ Merged ${newCards.length} new card${newCards.length!==1?"s":""} and ${newBoxes.length} new box session${newBoxes.length!==1?"s":""}!`);
-
-      // Background: fetch real card data (images + prices) for imported cards
-      // Don't await — let it run silently after modal shows success
-      if (newCards.length > 0) {
-        setTimeout(async () => {
-          try {
-            const ids = newCards.map(c => c.card.id).filter(Boolean);
-            // Fetch fresh card data from Scryfall in batches of 5 (rate limit friendly)
-            for (let i = 0; i < ids.length; i += 5) {
-              const batch = ids.slice(i, i + 5);
-              const freshCards = (await Promise.all(
-                batch.map(id => scryfallFetch(`/cards/${id}`).then(d => d ? normalizeScryfallCard(d) : null).catch(() => null))
-              )).filter(Boolean);
-              if (freshCards.length > 0 && onEnrichCards) onEnrichCards(freshCards);
-              if (i + 5 < ids.length) await new Promise(r => setTimeout(r, 100));
-            }
-          } catch(_e) {}
-        }, 500);
-      }
-    } catch(e) {
-      console.error("Import error:", e);
-      setStatus("Import failed: " + e.message);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:300,
-      display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-      <div style={{ background:"#111", border:`1px solid ${BORDER}`, borderRadius:24,
-        width:"100%", maxWidth:420, padding:"24px", maxHeight:"92vh", overflowY:"auto" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20, paddingTop:"env(safe-area-inset-top, 0px)" }}>
-          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff", letterSpacing:1 }}>SYNC DEVICES</div>
-          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
-            <Icon.Close size={20} color="#555"/>
-          </button>
-        </div>
-        <div style={{ display:"flex", background:"#1a1a1a", borderRadius:12, padding:4, gap:4, marginBottom:20 }}>
-          {[["export","Export / Backup"],["import","Import / Merge"]].map(([id,label]) => (
-            <button key={id} onClick={()=>{ setTab(id); setSyncCode(""); setQrDataUrl(null); setQrIndex(0); setStatus(""); stopScan(); }} style={{
-              flex:1, padding:"10px 0", background:tab===id?"#fff":"transparent",
-              color:tab===id?"#000":"#555", border:"none", borderRadius:8,
-              fontFamily:"'Bebas Neue',sans-serif", fontSize:13, letterSpacing:1, cursor:"pointer",
-            }}>{label}</button>
-          ))}
-        </div>
-
-        {tab === "export" && (
-          <div>
-            <div style={{ color:"#888", fontSize:13, marginBottom:14, lineHeight:1.6 }}>
-              Generate a QR code — scan it on your other device to merge instantly.
-            </div>
-            <div style={{ background:"#0d0d0d", border:`1px solid ${BORDER}`, borderRadius:12,
-              padding:"12px 16px", marginBottom:14 }}>
-              <div style={{ color:"#555", fontSize:11, marginBottom:2 }}>EXPORTING</div>
-              <div style={{ color:"#fff", fontSize:14 }}>{collection.length} cards · {boxes.length} pack sessions</div>
-            </div>
-            {!qrDataUrl ? (
-              <button onClick={handleExport} disabled={loading} style={{
-                width:"100%", padding:14, background:TEAL, border:"none", borderRadius:14,
-                fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1,
-                color:"#000", cursor:loading?"default":"pointer", marginBottom:10,
-              }}>{loading ? "Generating..." : "GENERATE QR CODE"}</button>
-            ) : (
-              <div>
-                {/* QR slideshow */}
-                <div style={{ background:"#0a0a0a", borderRadius:16, padding:16, marginBottom:12,
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
-                  <img src={qrDataUrl[qrIndex]} alt={`QR ${qrIndex+1}`}
-                    style={{ width:260, height:260, imageRendering:"pixelated" }}/>
-                  {/* Progress dots */}
-                  <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                    {qrDataUrl.map((_, i) => (
-                      <div key={i} onClick={()=>setQrIndex(i)} style={{
-                        width: i===qrIndex ? 20 : 8, height:8, borderRadius:4,
-                        background: i===qrIndex ? TEAL : "#333",
-                        cursor:"pointer", transition:"all 0.2s",
-                      }}/>
-                    ))}
-                  </div>
-                  <div style={{ color:"#555", fontSize:12, textAlign:"center" }}>
-                    {qrDataUrl.length === 1
-                      ? "Scan this QR code on your other device"
-                      : `QR ${qrIndex+1} of ${qrDataUrl.length} — scan each one in order`
-                    }
-                  </div>
-                  {/* Prev/Next */}
-                  {qrDataUrl.length > 1 && (
-                    <div style={{ display:"flex", gap:10, width:"100%" }}>
-                      <button onClick={()=>setQrIndex(i=>Math.max(0,i-1))} disabled={qrIndex===0} style={{
-                        flex:1, padding:"8px 0", background:"#111", border:`1px solid ${BORDER}`,
-                        borderRadius:10, color:qrIndex===0?"#333":"#fff", cursor:qrIndex===0?"default":"pointer",
-                        fontSize:18, fontFamily:"inherit",
-                      }}>‹</button>
-                      <div style={{ flex:2, display:"flex", alignItems:"center", justifyContent:"center",
-                        color:TEAL, fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1 }}>
-                        {qrIndex+1} / {qrDataUrl.length}
-                      </div>
-                      <button onClick={()=>setQrIndex(i=>Math.min(qrDataUrl.length-1,i+1))} disabled={qrIndex===qrDataUrl.length-1} style={{
-                        flex:1, padding:"8px 0", background:"#111", border:`1px solid ${BORDER}`,
-                        borderRadius:10, color:qrIndex===qrDataUrl.length-1?"#333":"#fff",
-                        cursor:qrIndex===qrDataUrl.length-1?"default":"pointer",
-                        fontSize:18, fontFamily:"inherit",
-                      }}>›</button>
-                    </div>
-                  )}
-                </div>
-                <button onClick={()=>{ setSyncCode(""); setQrDataUrl(null); setQrIndex(0); }} style={{
-                  width:"100%", padding:10, background:"none", border:`1px solid ${BORDER}`,
-                  borderRadius:12, color:"#555", fontSize:12, cursor:"pointer",
-                  fontFamily:"inherit", marginBottom:6,
-                }}>Regenerate</button>
-              </div>
-            )}
-            <button onClick={downloadFile} style={{
-              width:"100%", padding:10, marginTop:8, background:"none", border:`1px solid ${BORDER}`,
-              borderRadius:12, color:"#555", fontSize:12, cursor:"pointer", fontFamily:"inherit",
-            }}>Download as JSON file instead</button>
-          </div>
-        )}
-
-        {tab === "import" && (
-          <div>
-            <div style={{ color:"#888", fontSize:13, marginBottom:14, lineHeight:1.6 }}>
-              Scan a QR code from your other device, or paste a sync code.
-            </div>
-            {!scanning ? (
-              <button onClick={startQrScan} style={{
-                width:"100%", padding:14, background:"#0d1f19", border:`1px solid ${TEAL}44`,
-                borderRadius:14, fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1,
-                color:TEAL, cursor:"pointer", marginBottom:12,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:10,
-              }}>
-                <Icon.Camera size={18} color={TEAL}/> SCAN QR CODE
-              </button>
-            ) : (
-              <div style={{ marginBottom:12 }}>
-                <div style={{ position:"relative" }}>
-                  <video ref={scanVideoRef} style={{ width:"100%", borderRadius:12, display:"block" }} playsInline muted/>
-                  <canvas ref={scanCanvasRef} style={{ display:"none" }}/>
-                  <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
-                    <div style={{ width:200, height:200, border:`2px solid ${TEAL}`, borderRadius:12, opacity:0.7 }}/>
-                  </div>
-                  <button onClick={stopScan} style={{
-                    position:"absolute", top:8, right:8, background:"rgba(0,0,0,0.7)",
-                    border:"none", borderRadius:20, padding:"6px 12px",
-                    color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"inherit",
-                  }}>Cancel</button>
-                </div>
-                {status && (
-                  <div style={{ marginTop:8, padding:"8px 12px", background:"#0d1f19",
-                    borderRadius:10, color:TEAL, fontSize:12, textAlign:"center" }}>
-                    {status}
-                  </div>
-                )}
-              </div>
-            )}
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
-              <div style={{ flex:1, height:1, background:"#222" }}/>
-              <span style={{ color:"#444", fontSize:11 }}>or paste / upload</span>
-              <div style={{ flex:1, height:1, background:"#222" }}/>
-            </div>
-            {/* File upload for mobile */}
-            <label style={{
-              display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-              width:"100%", padding:12, background:"#111", border:`1px solid ${BORDER}`,
-              borderRadius:12, color:"#888", fontSize:13, cursor:"pointer",
-              fontFamily:"inherit", marginBottom:10, boxSizing:"border-box",
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              Upload JSON backup file
-              <input type="file" accept=".json,application/json" style={{ display:"none" }}
-                onChange={e => {
-                  const f = e.target.files[0]; if (!f) return;
-                  const r = new FileReader();
-                  r.onload = ev => { setImportCode(ev.target.result); setStatus("File loaded — tap Merge to import."); };
-                  r.readAsText(f);
-                  e.target.value = ""; // reset so same file can be re-selected
-                }}/>
-            </label>
-            <textarea value={importCode} onChange={e=>setImportCode(e.target.value)}
-              placeholder="Paste sync code or JSON backup..."
-              style={{ width:"100%", minHeight:80, padding:12, background:"#0d0d0d",
-                border:`1px solid ${BORDER}`, borderRadius:12, color:"#ccc", fontSize:12,
-                fontFamily:"monospace", outline:"none", resize:"vertical",
-                boxSizing:"border-box", marginBottom:12 }}/>
-            <button onClick={handleImport} disabled={loading||!importCode.trim()} style={{
-              width:"100%", padding:14,
-              background:importCode.trim()?TEAL:"#1a1a1a", border:"none", borderRadius:14,
-              fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1,
-              color:importCode.trim()?"#000":"#444", cursor:importCode.trim()?"pointer":"default",
-            }}>{loading?"Importing...":"MERGE INTO COLLECTION"}</button>
-          </div>
-        )}
-
-        {status && (
-          <div style={{ marginTop:12, padding:"10px 14px", background:"#1a1a1a", borderRadius:10,
-            color: status.includes("fail")||status.includes("Invalid")||status.includes("denied") ? "#ef4444" : TEAL,
-            fontSize:12, textAlign:"center" }}>{status}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
 // ── PIN Lock ──────────────────────────────────────────────────────────────────
 // Global crash logger
 if (typeof window !== "undefined") {
@@ -4266,7 +3782,7 @@ function RangeBar({ active, onChange }) {
 }
 
 // ── Home View ─────────────────────────────────────────────────────────────────
-function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onSync, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
+function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
   const [showVal,      setShowVal]      = useState(true);
   const [newSets,      setNewSets]      = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -4448,7 +3964,6 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
                   {[
                     { label:"Export CSV", sub:"Spreadsheet of your collection", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>, action: () => { onExportCSV(); setSettingsOpen(false); } },
                     { label:"Full Backup", sub:"JSON export of everything", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>, action: () => { onExportBackup(); setSettingsOpen(false); } },
-                    { label:"Sync Devices", sub:"QR code device sync", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 4v5h5M20 20v-5h-5" stroke="#888" strokeWidth="2" strokeLinecap="round"/><path d="M20 9a8 8 0 00-14.93-2M4 15a8 8 0 0014.93 2" stroke="#888" strokeWidth="2" strokeLinecap="round"/></svg>, action: () => { onSync(); setSettingsOpen(false); } },
                   ].map(({ label, sub, icon, action }) => (
                     <button key={label} onClick={action}
                       style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
@@ -9163,7 +8678,6 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, collection.length]);
-  const [syncModal, setSyncModal]                 = useState(false);
 
   useEffect(()=>{
     purgeBadPriceCache();
@@ -9292,12 +8806,6 @@ function App() {
       await saveCollection(saved);
       setDetail(saved.find(i=>i.id===id) || null);
     }
-  };
-
-  const handleMerge = async (mergedCol, mergedBoxes) => {
-    setCol(mergedCol); await saveCollection(mergedCol);
-    setBoxes(mergedBoxes); saveBoxes(mergedBoxes);
-    setSyncModal(false);
   };
 
   const handleImport = async (items) => {
@@ -9508,30 +9016,8 @@ function App() {
     <div style={{ flex:1, display:'flex', overflow:'hidden', background:'#0a0a0a' }}>
 
         {/* Desktop sidebar — only on wide screens */}
-        {isDesktop && <DesktopSidebar tabs={tabs} tab={tab} setTab={setTab} setScanning={setScanning} collection={collection} onSync={()=>setSyncModal(true)}
+        {isDesktop && <DesktopSidebar tabs={tabs} tab={tab} setTab={setTab} setScanning={setScanning} collection={collection}
           onNavigate={(id) => { setTab(id); setDetail(null); setActiveBox(null); setActiveSetName(null); }}/>}
-
-      {/* Sync overlay */}
-      {syncModal && (
-        <SyncModal
-          collection={collection}
-          boxes={boxes}
-          onMerge={handleMerge}
-          onClose={()=>setSyncModal(false)}
-          onEnrichCards={async (freshCards) => {
-            setCol(prev => {
-              const updated = prev.map(item => {
-                const fresh = freshCards.find(f => f.id === item.card.id);
-                if (!fresh) return item;
-                recordPriceSnapshot(fresh);
-                return { ...item, card: fresh };
-              });
-              saveCollection(updated);
-              return updated;
-            });
-          }}
-        />
-      )}
 
         {/* Main content area */}
         <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0,
@@ -9576,7 +9062,7 @@ function App() {
                   </div>
                 )}
                 <div style={{ flex:1, overflow:"hidden" }}>
-                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onSync={()=>setSyncModal(true)} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
+                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
                 </div>
               </div>
             ) : tab==="search" ? (

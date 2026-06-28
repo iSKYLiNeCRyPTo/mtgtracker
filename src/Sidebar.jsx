@@ -53,7 +53,7 @@ const fmt = (n) => {
   return new Intl.NumberFormat("en-US", { style:"currency", currency:"USD", minimumFractionDigits:2 }).format(n);
 };
 
-export default function DesktopSidebar({ tab, setTab, setScanning, collection, onSync, onNavigate }) {
+export default function DesktopSidebar({ tab, setTab, setScanning, collection, onNavigate }) {
   const navItems = [
     { id:"home",       label:"Home",      Icon:Icons.Home },
     { id:"search",     label:"Search",    Icon:Icons.Search },
@@ -112,33 +112,6 @@ export default function DesktopSidebar({ tab, setTab, setScanning, collection, o
         <div style={{ color:"#444", fontSize:11, marginTop:4 }}>{(collection||[]).length} cards</div>
       </div>
 
-      <button onClick={onSync} style={{
-        display:"flex", alignItems:"center", gap:8, padding:"10px 20px",
-        background:"none", border:"none", cursor:"pointer", width:"100%",
-        borderLeft:"3px solid transparent", color:"#555", marginTop:4,
-      }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M4 4v5h5M20 20v-5h-5" stroke="#555" strokeWidth="1.8" strokeLinecap="round"/>
-          <path d="M20 9a8 8 0 00-14.93-2M4 15a8 8 0 0014.93 2" stroke="#555" strokeWidth="1.8" strokeLinecap="round"/>
-        </svg>
-        <span style={{ fontSize:12 }}>Sync Devices</span>
-      </button>
     </div>
-  );
-}
-
-export function SyncButton({ onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      display:"flex", alignItems:"center", gap:8, padding:"10px 20px",
-      background:"none", border:"none", cursor:"pointer", width:"100%",
-      borderLeft:"3px solid transparent", color:"#555",
-    }}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-        <path d="M8 17l-4-4 4-4M16 7l4 4-4 4" stroke="#555" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M4 13h16" stroke="#555" strokeWidth="1.8" strokeLinecap="round"/>
-      </svg>
-      <span style={{ fontSize:13 }}>Sync Devices</span>
-    </button>
   );
 }
