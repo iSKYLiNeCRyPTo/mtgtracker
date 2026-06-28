@@ -473,7 +473,9 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
     if (!entries.length) { setResolveErr("No card names found — check the format and try again."); return; }
     setResolving(true); setResolveErr("");
     const found = [], notFound = [];
+    const needsFuzzy = [];
     const CHUNK = 75;
+    // Pass 1: batch exact name lookup
     for (let i = 0; i < entries.length; i += CHUNK) {
       const chunk = entries.slice(i, i + CHUNK);
       try {
@@ -487,10 +489,28 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
         chunk.forEach(({ name, qty }) => {
           const card = byName[name.toLowerCase()];
           if (card) for (let q = 0; q < qty; q++) found.push(card);
-          else notFound.push(name);
+          else needsFuzzy.push({ name, qty });
         });
-      } catch { chunk.forEach(({ name }) => notFound.push(name)); }
+      } catch { chunk.forEach(e => needsFuzzy.push(e)); }
       if (i + CHUNK < entries.length) await new Promise(r => setTimeout(r, 150));
+    }
+    // Pass 2: fuzzy search for cards not found by exact name
+    for (let i = 0; i < needsFuzzy.length; i++) {
+      const { name, qty } = needsFuzzy[i];
+      try {
+        const res = await fetch(
+          `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(name)}`,
+          { headers: { "Content-Type": "application/json" } }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.object === "card") {
+            const card = normalizeScryfallCard(data);
+            for (let q = 0; q < qty; q++) found.push(card);
+          } else { notFound.push(name); }
+        } else { notFound.push(name); }
+      } catch { notFound.push(name); }
+      if (i + 1 < needsFuzzy.length) await new Promise(r => setTimeout(r, 100));
     }
     setResolved({ cards: found, notFound });
     setResolving(false);
