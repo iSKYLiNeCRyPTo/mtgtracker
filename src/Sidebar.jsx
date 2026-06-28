@@ -37,6 +37,14 @@ const Icons = {
       <path d="M2 13h20" stroke={color} strokeWidth="1.8"/>
     </svg>
   ),
+  Deck: ({ size=20, color="#fff" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="1"   y="5" width="13" height="17" rx="2" stroke={color} strokeWidth="1.6" opacity="0.28"/>
+      <rect x="4.5" y="3" width="13" height="17" rx="2" stroke={color} strokeWidth="1.6" opacity="0.58"/>
+      <rect x="8"   y="1" width="13" height="17" rx="2" stroke={color} strokeWidth="1.8"/>
+      <path d="M10.5 5.5h8" stroke={color} strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
 };
 
 const fmt = (n) => {
@@ -50,7 +58,7 @@ export default function DesktopSidebar({ tab, setTab, setScanning, collection, o
     { id:"home",       label:"Home",      Icon:Icons.Home },
     { id:"search",     label:"Search",    Icon:Icons.Search },
     { id:"packs",      label:"Packs",     Icon:Icons.Pack },
-    { id:"decks", label:"Decks", Icon:Icons.Portfolio },
+    { id:"decks", label:"Decks", Icon:Icons.Deck },
   ];
 
   // Sum collection value using Scryfall prices (usd / usd_foil based on foil flag)

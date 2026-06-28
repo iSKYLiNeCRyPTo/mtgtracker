@@ -4029,6 +4029,14 @@ const Icon = {
       <path d="M9 13v2m6-2v2" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
     </svg>
   ),
+  Deck: ({ size=24, color="#fff" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="1"   y="5" width="13" height="17" rx="2" stroke={color} strokeWidth="1.6" opacity="0.28"/>
+      <rect x="4.5" y="3" width="13" height="17" rx="2" stroke={color} strokeWidth="1.6" opacity="0.58"/>
+      <rect x="8"   y="1" width="13" height="17" rx="2" stroke={color} strokeWidth="1.8"/>
+      <path d="M10.5 5.5h8" stroke={color} strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
   Back: ({ size=24, color="#fff" }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <path d="M15 19l-7-7 7-7" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -9489,7 +9497,7 @@ function App() {
     { id:"search",     Icon:Icon.Search,    label:"Search" },
     { id:"scan",       Icon:Icon.Camera,    label:"Scan", action:()=>setScanning(true), isScan:true },
     { id:"packs",      Icon:Icon.Pack,      label:"Packs" },
-    { id:"decks",      Icon:Icon.Portfolio, label:"Decks" },
+    { id:"decks",      Icon:Icon.Deck,      label:"Decks" },
   ];
 
   return (
