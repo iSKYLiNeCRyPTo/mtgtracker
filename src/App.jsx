@@ -3793,7 +3793,7 @@ function RangeBar({ active, onChange }) {
 }
 
 // ── Home View ─────────────────────────────────────────────────────────────────
-function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onBrowseSet, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
+function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onBrowseSet, onExportCSV, onExportBackup, onImportDeckFile, fbUser, fbSyncing, onSignIn, onSignOut }) {
   const [showVal,      setShowVal]      = useState(true);
   const [newSets,      setNewSets]      = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -3972,10 +3972,22 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
                 {/* Data section */}
                 <div style={{ padding:"12px 20px", borderBottom:`1px solid ${BORDER}` }}>
                   <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:10 }}>DATA</div>
-                  {[
-                    { label:"Export CSV", sub:"Spreadsheet of your collection", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>, action: () => { onExportCSV(); setSettingsOpen(false); } },
-                    { label:"Full Backup", sub:"JSON export of everything", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>, action: () => { onExportBackup(); setSettingsOpen(false); } },
-                  ].map(({ label, sub, icon, action }) => (
+                  {(() => {
+                    const deckImportRef = React.createRef();
+                    return <>
+                      <input ref={deckImportRef} type="file" accept=".txt" style={{ display:"none" }}
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          onImportDeckFile && onImportDeckFile(f);
+                          setSettingsOpen(false);
+                          e.target.value = "";
+                        }}/>
+                      {[
+                        { label:"Import Deck", sub:"Archidekt .txt file", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>, action: () => deckImportRef.current?.click() },
+                        { label:"Export CSV", sub:"Spreadsheet of your collection", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>, action: () => { onExportCSV(); setSettingsOpen(false); } },
+                        { label:"Full Backup", sub:"JSON export of everything", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>, action: () => { onExportBackup(); setSettingsOpen(false); } },
+                      ].map(({ label, sub, icon, action }) => (
                     <button key={label} onClick={action}
                       style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
                         padding:"10px 0", background:"none", border:"none", cursor:"pointer",
@@ -3989,7 +4001,8 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
                         <div style={{ color:"#555", fontSize:11 }}>{sub}</div>
                       </div>
                     </button>
-                  ))}
+                  ))}</>
+                  ;})()}
                 </div>
 
               </div>
@@ -9161,6 +9174,7 @@ function App() {
   const [scanning, setScanning] = useState(false);
   const [priceChecking, setPriceChecking] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [pendingImportText, setPendingImportText] = useState("");
   const [dupeCard, setDupeCard]     = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);
   const [detail, setDetail]         = useState(null);
@@ -9713,11 +9727,11 @@ function App() {
                   </div>
                 )}
                 <div style={{ flex:1, overflow:"hidden" }}>
-                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
+                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onExportCSV={exportCSV} onExportBackup={exportBackup} onImportDeckFile={async f=>{ const text = await f.text(); setPendingImportText(text); setTab("decks"); }} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
                 </div>
               </div>
             ) : tab==="decks" ? (
-              <DecksView collection={collection}/>
+              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")}/>
             ) : tab==="collection" ? (
               <CollectionView collection={collection} onCardPress={item=>setDetail(item)} onImport={()=>setImporting(true)} onRefreshPrices={refreshAllPrices} refreshing={refreshing}
                 collSubTab={collSubTab} setCollSubTab={setCollSubTab}
