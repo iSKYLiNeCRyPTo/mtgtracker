@@ -5271,64 +5271,95 @@ function SearchView({ onCardPress, onAdd }) {
   const [condition, setCondition] = useState("near_mint");
   const [acqType, setAcqType] = useState("bought");
   const [costPaid, setCostPaid] = useState("");
-  const [cardsMeta, setCardsMeta] = useState(null); // null = not loaded yet
+  const [cardsMeta, setCardsMeta] = useState(null);
+  const [workerReady, setWorkerReady] = useState(false);
+  const workerRef = useRef(null);
+  const reqIdRef  = useRef(0);
 
-  // Load cards meta from IDB on mount (same data used by GlobalScanFlow)
+  // Spin up search worker once
+  useEffect(() => {
+    const w = new Worker(new URL('./searchWorker.js', import.meta.url), { type: 'module' });
+    workerRef.current = w;
+    w.onmessage = ({ data }) => {
+      if (data.type === 'ready') {
+        setWorkerReady(true);
+      } else if (data.type === 'results') {
+        // Ignore stale responses from earlier keystrokes
+        if (data.reqId !== reqIdRef.current) return;
+        setResults(data.ids.map(id => cardsMeta?.[id]).filter(Boolean));
+        setLoading(false);
+      }
+    };
+    return () => w.terminate();
+  }, []);
+
+  // Load cards meta from IDB, then send lightweight index to worker
   useEffect(() => {
     const open = indexedDB.open("mtgtracker-global-index", 1);
     open.onupgradeneeded = e => e.target.result.createObjectStore("index");
     open.onsuccess = e => {
       const tx = e.target.result.transaction("index", "readonly");
       const req = tx.objectStore("index").get("index-cards");
-      req.onsuccess = () => setCardsMeta(req.result || {});
-      req.onerror   = () => setCardsMeta({});
+      req.onsuccess = () => {
+        const meta = req.result || {};
+        setCardsMeta(meta);
+        // Build lightweight pre-lowercased index for the worker
+        const items = Object.values(meta).map(c => ({
+          id:  c.id,
+          n:   (c.name       || "").toLowerCase(),
+          num: (c.number     || "").toLowerCase(),
+          s:   (c.set?.name  || "").toLowerCase(),
+          sid: (c.set?.id    || "").toLowerCase(),
+          r:   (c.rarity     || "").toLowerCase(),
+        }));
+        workerRef.current?.postMessage({ type: 'index', items });
+      };
+      req.onerror = () => setCardsMeta({});
     };
     open.onerror = () => setCardsMeta({});
   }, []);
+
+  // Keep worker's onmessage closure fresh when cardsMeta updates
+  useEffect(() => {
+    if (!workerRef.current) return;
+    workerRef.current.onmessage = ({ data }) => {
+      if (data.type === 'ready') {
+        setWorkerReady(true);
+      } else if (data.type === 'results') {
+        if (data.reqId !== reqIdRef.current) return;
+        setResults(data.ids.map(id => cardsMeta?.[id]).filter(Boolean));
+        setLoading(false);
+      }
+    };
+  }, [cardsMeta]);
 
   const doSearch = useCallback((query) => {
     if (!query.trim()) { setResults([]); setSearched(false); return; }
     setSearched(true);
 
-    // Local search if cards meta available (instant)
-    if (cardsMeta && Object.keys(cardsMeta).length > 0) {
-      const q2 = query.toLowerCase().trim();
-      const res = Object.values(cardsMeta)
-        .filter(c => {
-          const name = (c.name  || "").toLowerCase();
-          const num  = (c.number || "").toLowerCase();
-          const set  = (c.set?.name || "").toLowerCase();
-          const setId = (c.set?.id || "").toLowerCase();
-          return name.includes(q2) || num === q2 ||
-                 set.includes(q2) || setId.includes(q2) ||
-                 (c.rarity || "").toLowerCase().includes(q2);
-        })
-        .sort((a, b) => {
-          const aStart = (a.name || "").toLowerCase().startsWith(q2) ? 0 : 1;
-          const bStart = (b.name || "").toLowerCase().startsWith(q2) ? 0 : 1;
-          return aStart - bStart || (a.name || "").localeCompare(b.name || "");
-        })
-        .slice(0, 48);
-      setResults(res);
+    if (workerReady) {
+      // Off-thread search — never blocks the UI
+      const reqId = ++reqIdRef.current;
+      setLoading(true);
+      workerRef.current.postMessage({ type: 'search', query, reqId });
       return;
     }
 
-    // Fallback to API if IDB not loaded yet
+    // Fallback to API if worker/index not ready yet
     setLoading(true);
     searchCards(query, 24).then(cards => {
       setResults(cards);
       setLoading(false);
     }).catch(() => { setResults([]); setLoading(false); });
-  }, [cardsMeta]);
+  }, [workerReady]);
 
-  // Search on every keystroke — instant when local
+  // Debounce: 150ms even for local (batches rapid keystrokes, prevents flooding worker)
   useEffect(() => {
     if (!q.trim()) { setResults([]); setSearched(false); return; }
-    // Instant if local, debounced if API fallback
-    const delay = (cardsMeta && Object.keys(cardsMeta).length > 0) ? 0 : 400;
+    const delay = workerReady ? 150 : 400;
     const t = setTimeout(() => doSearch(q), delay);
     return () => clearTimeout(t);
-  }, [q, cardsMeta]);
+  }, [q, workerReady]);
 
   const handleAdd = () => {
     if (!addingCard) return;
@@ -5353,8 +5384,8 @@ function SearchView({ onCardPress, onAdd }) {
           </div>
           <input value={q} onChange={e => setQ(e.target.value)}
             onKeyDown={e => e.key === "Enter" && doSearch(q)}
-            placeholder={cardsMeta && Object.keys(cardsMeta).length > 0
-              ? `Search ${Object.keys(cardsMeta).length.toLocaleString()} cards instantly...`
+            placeholder={workerReady
+              ? `Search ${Object.keys(cardsMeta||{}).length.toLocaleString()} cards...`
               : "Search Magic cards..."}
             style={{ width:"100%", padding:"11px 12px 11px 36px", background:CARD,
               border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
@@ -5362,7 +5393,7 @@ function SearchView({ onCardPress, onAdd }) {
         </div>
       </div>
       <div style={{ padding:"12px 16px" }}>
-        {loading && !(cardsMeta && Object.keys(cardsMeta).length > 0) && (
+        {loading && (
           <div style={{ display:"flex", justifyContent:"center", padding:40 }}>
             <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
               borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
@@ -6079,7 +6110,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
                 for the nav, which pushed bottom:0 stickiness past the visible
                 screen edge. */}
             {selected.length > 0 && (
-              <div style={{ position:"sticky", bottom:"calc(60px + env(safe-area-inset-bottom, 0px))", zIndex:5, padding:"16px 20px",
+              <div style={{ position:"sticky", bottom:0, zIndex:5, padding:"16px 20px",
                 paddingBottom:16,
                 borderTop:`1px solid ${BORDER}`, borderBottom:`1px solid ${BORDER}`,
                 background:"#0d0d0d", boxShadow:"0 4px 16px rgba(0,0,0,0.5)" }}>
@@ -6387,7 +6418,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
 
       {/* Bulk action bar */}
       {bulkMode && bulkSelected.size > 0 && (
-        <div style={{ position:"sticky", bottom:"calc(60px + env(safe-area-inset-bottom, 0px))", zIndex:10,
+        <div style={{ position:"sticky", bottom:0, zIndex:10,
           padding:"14px 20px", borderTop:`1px solid ${BORDER}`, background:"#0d0d0d",
           boxShadow:"0 -4px 20px rgba(0,0,0,0.6)", display:"flex", gap:10, alignItems:"center" }}>
           <span style={{ color:"#888", fontSize:12, flex:1 }}>{bulkSelected.size} selected</span>
@@ -9484,7 +9515,6 @@ function App() {
           paddingTop: insets.top, overflow:'hidden' }}>
           <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', minHeight:0,
             WebkitOverflowScrolling:'touch', overscrollBehavior:'contain',
-            paddingBottom: isDesktop ? 0 : (60 + bottomInset),
             animation:'fadeUp 0.25s ease' }}>
             {detail ? (
               <CardDetailView
@@ -9739,13 +9769,12 @@ function App() {
             ) : null}
           </div>
 
-          {/* Bottom nav — fixed to screen bottom, always visible */}
+          {/* Bottom nav — flex child pinned to the bottom of the column */}
           {!isDesktop && (
             <div style={{
-              position:'fixed', bottom:0, left:0, right:0,
+              flexShrink:0,
               background:'#0d0d0d',
               borderTop:'1px solid #1e1e1e',
-              zIndex:999,
               paddingBottom: bottomInset,
             }}>
               <div style={{ display:'flex', height:60 }}>
