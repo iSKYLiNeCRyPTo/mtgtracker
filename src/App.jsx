@@ -6630,7 +6630,7 @@ function MasterSetView({ collection, onCardPress, onBack, selectedSetId, setSele
 function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, refreshing,
   collSubTab="collection", setCollSubTab, masterSetId, setMasterSetId, onAddMissingCard,
   sort="date_desc", setSort, tradeList=[], onToggleTrade,
-  onBulkDelete, onBulkCondition }) {
+  onBulkDelete, onBulkCondition, onGoToDecks }) {
   const [search, setSearch] = useState("");
   const [minValue, setMinValue] = useState(0);
   const [bulkMode, setBulkMode] = useState(false);
@@ -6968,6 +6968,22 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
             </div>
           </div>
         </div>
+
+        {/* MY DECKS / PORTFOLIO toggle */}
+        {onGoToDecks && (
+          <div style={{ display:"flex", borderBottom:`1px solid ${BORDER}`, marginLeft:-20, marginRight:-20, paddingLeft:20, paddingRight:20 }}>
+            <button onClick={onGoToDecks} style={{
+              flex:1, padding:"9px 0", background:"none", border:"none",
+              borderBottom:"2px solid transparent", color:"#555",
+              fontSize:11, fontWeight:400, cursor:"pointer", fontFamily:"inherit", letterSpacing:0.8, marginBottom:-1,
+            }}>MY DECKS</button>
+            <button style={{
+              flex:1, padding:"9px 0", background:"none", border:"none",
+              borderBottom:`2px solid ${TEAL}`, color:TEAL,
+              fontSize:11, fontWeight:700, cursor:"default", fontFamily:"inherit", letterSpacing:0.8, marginBottom:-1,
+            }}>PORTFOLIO</button>
+          </div>
+        )}
 
         {/* Min value filter pills */}
         <div style={{ display:"flex", gap:6, padding:"8px 0 4px", overflowX:"auto" }}>
@@ -10396,7 +10412,8 @@ function App() {
                 sort={collSort} setSort={setCollSort}
                 tradeList={tradeList} onToggleTrade={toggleTrade}
                 onBulkDelete={bulkDeleteCards} onBulkCondition={bulkUpdateCondition}
-                onAddMissingCard={(card, forceCondition)=>{ setMissingCard(forceCondition ? { ...card, _forceCondition: forceCondition } : card); setScanning(false); }}/>
+                onAddMissingCard={(card, forceCondition)=>{ setMissingCard(forceCondition ? { ...card, _forceCondition: forceCondition } : card); setScanning(false); }}
+                onGoToDecks={()=>setTab("decks")}/>
             ) : tab==="packs" ? (
               activeBox ? (
                 <BoxDetailView
