@@ -39,6 +39,7 @@
     @keyframes spin    { to { transform:rotate(360deg); } }
     @keyframes fadeUp  { from { opacity:0;transform:translateY(10px); } to { opacity:1;transform:none; } }
     @keyframes slideUp { from { opacity:0;transform:translateY(40px); } to { opacity:1;transform:none; } }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px) !important; }
     @media (min-width:768px) {
       .sidebar { display:flex !important; flex-direction:column; width:220px; background:#0d0d0d; border-right:1px solid #1e1e1e; padding:24px 0 32px; flex-shrink:0; }
       .mob-nav  { display:none !important; }
