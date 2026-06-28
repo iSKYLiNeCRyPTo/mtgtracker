@@ -728,7 +728,7 @@ function ImportModal({ initialText, onClose, onImported }) {
 const ROLE_TAG_LIST = ["draw","removal","ramp","lifegain","token","graveyard","board-wipe","counter","burn","protection","evasion","recursion"];
 const TYPE_TAG_LIST = ["creature","instant","sorcery","artifact","enchantment","land"];
 
-function PortfolioTab({ collection, decks, onAddToDeck }) {
+function PortfolioTab({ collection, decks, onAddToDeck, onCardPress }) {
   const [q, setQ]                   = useState("");
   const [colorFilter, setColorFilter] = useState(new Set());
   const [tagFilter, setTagFilter]   = useState(new Set());
@@ -854,8 +854,8 @@ function PortfolioTab({ collection, decks, onAddToDeck }) {
         )}
       </div>
 
-      {/* Card list */}
-      <div style={{ flex:1, overflowY:"auto", padding:"8px 16px 20px" }}>
+      {/* Card grid */}
+      <div style={{ flex:1, overflowY:"auto", padding:"6px 12px 20px" }}>
         {activeCards.length === 0 ? (
           <div style={{ textAlign:"center", padding:"50px 20px", color:"#333" }}>
             <div style={{ fontSize:13 }}>No cards yet — add cards to your collection or import a deck.</div>
@@ -869,55 +869,81 @@ function PortfolioTab({ collection, decks, onAddToDeck }) {
             <div style={{ color:"#444", fontSize:11, marginBottom:8, paddingTop:4 }}>
               {filtered.length.toLocaleString()} card{filtered.length !== 1 ? "s" : ""}
             </div>
-            {filtered.map((item, idx) => {
-              const card = item.card;
-              const price = parseFloat((item.foil ? card?.prices?.usd_foil : card?.prices?.usd) || card?.prices?.usd || 0);
-              const tags  = (item.autoTags || computeAutoTags(card)).slice(0, 3);
-              return (
-                <div key={item.id || idx} style={{ display:"flex", alignItems:"center", gap:10,
-                  padding:"10px 0", borderBottom:`1px solid ${BORDER}` }}>
-                  <img src={card?.images?.small || card?.image_uris?.small}
-                    alt={card?.name}
-                    style={{ height:44, borderRadius:4, flexShrink:0 }}
-                    onError={e => { e.target.style.display = "none"; }}/>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ color:"#fff", fontSize:13, fontWeight:500,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {card?.name}
-                    </div>
-                    <div style={{ display:"flex", gap:4, marginTop:3, flexWrap:"wrap", alignItems:"center" }}>
-                      {item._deckSource && (
-                        <span style={{ fontSize:9, padding:"1px 5px", borderRadius:10,
-                          background:"#00D4AA22", border:"1px solid #00D4AA44", color:TEAL,
-                          whiteSpace:"nowrap" }}>
-                          {item._deckSource}
-                        </span>
-                      )}
-                      {tags.map(tag => {
-                        const meta = getTagMeta(tag);
-                        const tc = meta?.color || "#555";
-                        return (
-                          <span key={tag} style={{ fontSize:9, padding:"1px 5px", borderRadius:10,
-                            background: tc + "22", border: `1px solid ${tc}44`, color: tc }}>
-                            {meta?.label || tag}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {filtered.map((item, idx) => {
+                const card = item.card;
+                const price = parseFloat((item.foil ? card?.prices?.usd_foil : card?.prices?.usd) || card?.prices?.usd || 0);
+                const img = card?.images?.normal || card?.images?.small;
+                return (
+                  <div key={item.id || idx}
+                    onClick={() => onCardPress ? onCardPress(item) : setAddingCard(item)}
+                    style={{ background:"#111", borderRadius:12, overflow:"hidden",
+                      border:`1px solid ${BORDER}`, cursor:"pointer",
+                      transition:"border-color 0.15s", WebkitTapHighlightColor:"transparent" }}
+                    onTouchStart={e => { e.currentTarget.style.borderColor = TEAL + "55"; }}
+                    onTouchEnd={e => { e.currentTarget.style.borderColor = BORDER; }}>
+
+                    {/* Card image — 5:7 MTG aspect ratio */}
+                    <div style={{ aspectRatio:"5/7", background:"#1a1a1a", overflow:"hidden", position:"relative" }}>
+                      {img ? (
+                        <img src={img} alt={card?.name}
+                          style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
+                          onError={e => { e.target.style.display="none"; }}/>
+                      ) : (
+                        <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
+                          justifyContent:"center", padding:8, boxSizing:"border-box" }}>
+                          <span style={{ color:"#333", fontSize:10, textAlign:"center", lineHeight:1.4 }}>
+                            {card?.name}
                           </span>
-                        );
-                      })}
+                        </div>
+                      )}
+                      {/* Foil / deck-source badge */}
+                      {(item.foil || item._deckSource) && (
+                        <div style={{ position:"absolute", top:6, right:6, display:"flex", flexDirection:"column", gap:3, alignItems:"flex-end" }}>
+                          {item.foil && (
+                            <span style={{ fontSize:8, padding:"2px 5px", borderRadius:5,
+                              background:"#0009", color:"#f59e0b", border:"1px solid #f59e0b55",
+                              fontWeight:700, letterSpacing:0.3 }}>FOIL</span>
+                          )}
+                          {item._deckSource && (
+                            <span style={{ fontSize:8, padding:"2px 5px", borderRadius:5,
+                              background:"#0009", color:TEAL, border:`1px solid ${TEAL}44`,
+                              fontWeight:700, maxWidth:60, overflow:"hidden", textOverflow:"ellipsis",
+                              whiteSpace:"nowrap" }}>{item._deckSource}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Info below image */}
+                    <div style={{ padding:"8px 9px 9px" }}>
+                      <div style={{ color:"#fff", fontSize:11, fontWeight:600, lineHeight:1.3,
+                        display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
+                        overflow:"hidden", marginBottom:2 }}>
+                        {card?.name}
+                      </div>
+                      <div style={{ color:"#555", fontSize:9,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {card?.set?.name || "—"}
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:5 }}>
+                        <span style={{ color: price > 0 ? TEAL : "#333",
+                          fontFamily:"'Bebas Neue',sans-serif", fontSize:15, letterSpacing:0.5 }}>
+                          {price > 0 ? `$${price.toFixed(2)}` : "—"}
+                        </span>
+                        <button
+                          onClick={e => { e.stopPropagation(); setAddingCard(item); }}
+                          style={{ background:"#1a1a1a", border:`1px solid ${BORDER}`,
+                            borderRadius:6, color:"#666", fontSize:9, cursor:"pointer",
+                            padding:"3px 7px", fontFamily:"inherit" }}>
+                          + Deck
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, flexShrink:0 }}>
-                    {price > 0 && (
-                      <div style={{ color:TEAL, fontSize:12, fontWeight:700 }}>${price.toFixed(2)}</div>
-                    )}
-                    <button onClick={() => setAddingCard(item)} style={{
-                      background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:8,
-                      color:"#888", fontSize:10, cursor:"pointer", padding:"4px 8px",
-                      fontFamily:"inherit", whiteSpace:"nowrap",
-                    }}>+ Deck</button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </>
         )}
       </div>
@@ -1735,7 +1761,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
 }
 
 // ── Main DecksView export ─────────────────────────────────────────────────────
-export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck }) {
+export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck, onCardPress }) {
   const [decks, setDecks]             = useState(loadDecks);
   const [editingDeck, setEditingDeck] = useState(null);
   const [playingDeck, setPlayingDeck] = useState(null);
@@ -1881,7 +1907,7 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
 
       {/* Portfolio tab */}
       {mainTab === "portfolio" ? (
-        <PortfolioTab collection={collection} decks={decks} onAddToDeck={addCardToDeck}/>
+        <PortfolioTab collection={collection} decks={decks} onAddToDeck={addCardToDeck} onCardPress={onCardPress}/>
       ) : (
         /* Deck list */
         <div style={{ flex:1, overflowY:"auto", padding:"14px 16px", display:"flex",

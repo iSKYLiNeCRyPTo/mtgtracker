@@ -3894,6 +3894,45 @@ async function fetchTCGPlayerPrice(card, foil = false) {
 // ── Price history storage (localStorage) ─────────────────────────────────────
 const HISTORY_PREFIX = "price-history:";
 
+function loadPriceHistory(cardId) {
+  if (!cardId) return [];
+  try {
+    const raw = localStorage.getItem(HISTORY_PREFIX + cardId);
+    return raw ? JSON.parse(raw) : [];
+  } catch(_e) { return []; }
+}
+
+function recordPriceSnapshot(card) {
+  if (!card?.id) return;
+  const price = parseFloat(card.prices?.usd || card.prices?.usd_foil || 0);
+  if (price <= 0) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const snapshot = { date: today, price };
+  try {
+    const existing = loadPriceHistory(card.id);
+    const idx = existing.findIndex(s => s.date === today);
+    if (idx >= 0) {
+      existing[idx] = snapshot;
+    } else {
+      existing.push(snapshot);
+    }
+    const trimmed = existing.sort((a, b) => a.date.localeCompare(b.date)).slice(-730);
+    localStorage.setItem(HISTORY_PREFIX + card.id, JSON.stringify(trimmed));
+    // Push to shared Firestore history (fire-and-forget)
+    if (isFirebaseConfigured()) {
+      pushPriceSnapshotToShared(card.id, snapshot).catch(() => {});
+    }
+  } catch(_e) {}
+}
+
+async function loadAndMergePriceHistory(cardId) {
+  const local = loadPriceHistory(cardId);
+  if (!isFirebaseConfigured()) return local;
+  try {
+    return await mergeSharedPriceHistory(cardId, local);
+  } catch(_e) { return local; }
+}
+
 // ── PriceCharting historical data ─────────────────────────────────────────────
 // Sign up free at https://www.pricecharting.com/api
 // Set VITE_PRICECHARTING_KEY in Cloudflare Pages environment variables
@@ -10333,7 +10372,7 @@ function App() {
                 </div>
               </div>
             ) : tab==="decks" ? (
-              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)}/>
+              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)} onCardPress={item=>setDetail(item)}/>
             ) : tab==="collection" ? (
               <CollectionView collection={collection} onCardPress={item=>setDetail(item)} onImport={()=>setImporting(true)} onRefreshPrices={refreshAllPrices} refreshing={refreshing}
                 collSubTab={collSubTab} setCollSubTab={setCollSubTab}
