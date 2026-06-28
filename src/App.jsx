@@ -7312,7 +7312,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
 
 
 // ── Camera / Scan View ───────────────────────────────────────────────────────
-function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId = null, onSearchFallback = null, globalWorker = null, visible = true }) {
+function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId = null, onSearchFallback = null, globalWorker = null, visible = true, hint = null }) {
   const videoRef    = useRef(null);
   const canvasRef   = useRef(null);
   const overlayCanvasRef = useRef(null); // transparent canvas for drawing detected card outline
@@ -7325,6 +7325,7 @@ function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId 
   const workerRef        = useRef(null);   // embedding web worker
   const embedReadyRef    = useRef(false);  // ref mirror of embedReady for RAF loop
   const embedProgressRef = useRef(null);   // ref mirror of embedProgress for RAF loop
+  const hintRef          = useRef(hint);   // ref mirror of hint prop for RAF loop (avoids stale closure)
   const [streaming,    setStreaming]    = useState(false);
   const [analyzing,    setAnalyzing]    = useState(false);
   const [motionHint,   setMotionHint]   = useState("Preparing scanner...");
@@ -7342,6 +7343,9 @@ function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId 
   const lastVecRef = useRef(null); // Float32Array of the last query embedding, for saving
   const analyzeTimeoutRef = useRef(null); // safety timeout for analyze()
   const dbg = (msg) => setDebugLog(prev => [`${new Date().toLocaleTimeString()}: ${msg}`, ...prev].slice(0, 20));
+
+  // Keep hintRef in sync so the RAF loop always reads the latest hint
+  useEffect(() => { hintRef.current = hint; }, [hint]);
 
   // ── Wire global worker when provided (bypasses per-set embedding) ─────────────
   useEffect(() => {
@@ -7440,6 +7444,7 @@ function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId 
         }
         if (type === "log") {
           setDebugLog(prev => [`[worker] ${e.data.msg}`, ...prev].slice(0,20));
+          if (!embedReadyRef.current) setMotionHint(e.data.msg);
         }
         if (type === "queryResult") {
           if (e.data.queryVec) lastVecRef.current = new Float32Array(e.data.queryVec);
@@ -8154,7 +8159,7 @@ function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId 
       if (!embedReadyRef.current) {
         setMotionHint(embedProgressRef.current
           ? `Fingerprinting ${embedProgressRef.current.done}/${embedProgressRef.current.total}...`
-          : "Loading scanner...");
+          : (hintRef.current || "Loading scanner..."));
         drawGuide(0, false);
         return;
       }
@@ -8998,15 +9003,23 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
         workerRef.current = worker;
         worker.postMessage({ type: "preload" }); // start model download in parallel with index fetch
 
+        worker.onerror = (e) => {
+          if (!cancelled) setIndexStatus("Scanner error — use search");
+        };
+
         worker.onmessage = (e) => {
           if (cancelled) return;
           const { type } = e.data;
           if (type === "log") {
             console.log("[GlobalScan]", e.data.msg);
-            // Show model download progress in the status banner
             if (e.data.msg.includes("Downloading") || e.data.msg.includes("DINOv2") || e.data.msg.includes("Loading")) {
               setIndexStatus(e.data.msg);
             }
+            return;
+          }
+          if (type === "error") {
+            console.error("[GlobalScan] Worker error:", e.data.msg);
+            setIndexStatus("Scanner unavailable — use search");
             return;
           }
           if (type === "globalIndexLoaded") {
