@@ -250,7 +250,7 @@ export async function getEmbeddingIndexMeta() {
   init();
   const apiKey    = firebaseConfig.apiKey;
   const projectId = firebaseConfig.projectId;
-  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/meta/embeddings?key=${apiKey}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/meta/embeddingIndex?key=${apiKey}`;
   try {
     const resp = await fetch(url);
     if (!resp.ok) return null;
