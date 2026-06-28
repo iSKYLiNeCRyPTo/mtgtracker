@@ -1,7 +1,6 @@
-import DesktopSidebar, { SyncButton } from "./Sidebar.jsx";
+import DesktopSidebar from "./Sidebar.jsx";
 import DecksView from "./DecksView.jsx";
 import { computeAutoTags, getTagMeta, TagChip, TAG_FILTER_GROUPS, HIDDEN_BY_DEFAULT_CATS } from "./cardTags.jsx";
-import QRCode from "qrcode";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -3100,489 +3099,6 @@ function PacksView({ boxes, onNewBox, onBoxPress, onGroupPress, onDelete, onUpda
 }
 
 
-// ── Sync helpers ──────────────────────────────────────────────────────────────
-// Condition abbreviations for v4 compact format
-const COND_TO_SHORT = { poor:"po", good:"go", excellent:"ex", near_mint:"nm", near_mint:"nh", near_mint:"hf", near_mint:"rh" };
-const SHORT_TO_COND = { nm:"near_mint", lp:"lightly_played", mp:"moderately_played", hp:"heavily_played", dm:"damaged", po:"damaged", go:"lightly_played", ex:"moderately_played" };
-const ACQ_TO_SHORT  = { bought:"b", pack:"p", scan:"s", gift:"g" };
-const SHORT_TO_ACQ  = { b:"bought", p:"pack", s:"scan", g:"gift" };
-
-// v4 ultra-minimal format — card ID is all we need; images re-fetched on demand
-function minifyCollection(collection) {
-  return collection.map(item => ({
-    i: item.id,
-    c: COND_TO_SHORT[item.condition] || item.condition,
-    t: Math.floor((item.addedAt||Date.now()) / 1000), // seconds not ms
-    p: item.costPaid || undefined,
-    a: ACQ_TO_SHORT[item.acqType] || item.acqType || "b",
-    sd: item.sold || undefined,
-    sp: item.soldPrice || undefined,
-    bx: item.boxId || undefined,
-    k: item.card.id,
-    n: item.card.name,
-    s: item.card.set?.name || "",
-    si: item.card.set?.id || "",
-    // No images — re-fetched from pokemontcg.io using card id
-    // Cache price to avoid re-fetching
-    q: (() => { const p = item.card?.tcgplayer?.prices; if (!p) return undefined; const v = Object.values(p)[0]; return v?.market || v?.mid || undefined; })(),
-  }));
-}
-
-// Restore full item from v4 compact format
-function expandCollection(mini) {
-  return mini.map(i => {
-    // Card number: for id like "me3-92" the number is "92", for "sv6-28" it's "28"
-    const cardId = i.k || "";
-    const cardNum = cardId.split("-").slice(1).join("-") || ""; // everything after first segment
-
-    // Image is fetched fresh from Scryfall when the card is opened
-    const setId = i.si || "";
-    const imgUrl = ""; // re-fetched from Scryfall by card ID
-
-    return {
-      id: i.i || `${cardId}-${i.t || Date.now()}-imported`,
-      condition: SHORT_TO_COND[i.c] || i.c || "near_mint",
-      addedAt: ((i.t || 0)) * 1000,
-      costPaid: i.p != null ? parseFloat(i.p) : null,  // ensure number not string
-      acqType: SHORT_TO_ACQ[i.a] || i.a || "bought",
-      sold: i.sd || false,
-      soldAt: null,
-      soldPrice: i.sp != null ? parseFloat(i.sp) : null,
-      boxId: i.bx || null,
-      packName: null,
-      card: {
-        id: cardId,
-        name: i.n || cardId,
-        number: cardNum,
-        set: { id: setId, name: i.s || "" },
-        images: { small: imgUrl, large: imgUrl.replace(".png","_hires.png") },
-        tcgplayer: i.q ? { prices: { near_mint: {
-          market: parseFloat(i.q),
-          mid: parseFloat(i.q),
-          low: +(parseFloat(i.q) * 0.85).toFixed(2)
-        }}} : {},
-      }
-    };
-  });
-}
-
-async function exportToSyncCode(collection, boxes) {
-  const data = { c: minifyCollection(collection), b: boxes, t: Math.floor(Date.now()/1000), v: 4 };
-  const json = JSON.stringify(data);
-  try {
-    const bytes = new TextEncoder().encode(json);
-    let binary = "";
-    bytes.forEach(b => binary += String.fromCharCode(b));
-    const b64 = btoa(binary);
-    return { code: b64, method: "inline", data: { collection, boxes } };
-  } catch(_e) {}
-  return { code: null, method: "file", data: { collection, boxes } };
-}
-
-async function importFromSyncCode(raw) {
-  const s = raw.trim();
-  try {
-    const binary = atob(s);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const json = new TextDecoder().decode(bytes);
-    const data = JSON.parse(json);
-    if (data.v === 4 && data.c) return { collection: expandCollection(data.c), boxes: data.b || [] };
-    if (data.v === 3 && data.c) {
-      const collection = data.c.map(i => ({
-        id: i.id, condition: i.cond, addedAt: i.at, costPaid: i.cost, acqType: i.acq,
-        sold: i.sold||false, soldPrice: i.sp||null, soldAt: null,
-        card: { id: i.card.id, name: i.card.n, number: i.card.num,
-          set: { id: i.card.sid, name: i.card.set },
-          images: { small: i.card.img, large: i.card.img },
-          tcgplayer: i.card.tcg ? { prices: JSON.parse(i.card.tcg) } : {} }
-      }));
-      return { collection, boxes: data.b||[] };
-    }
-    if (data.collection) return data;
-  } catch(_e) {}
-  try { const data = JSON.parse(s); if (data.collection) return data; } catch(_e) {}
-  return null;
-}
-
-
-
-// ── Sync Modal ────────────────────────────────────────────────────────────────
-function SyncModal({ collection, boxes, onMerge, onClose, onEnrichCards }) {
-  const [tab, setTab]             = useState("export");
-  const [syncCode, setSyncCode]   = useState("");
-  const [qrDataUrl, setQrDataUrl] = useState(null); // null | string[] of URLs
-  const [qrIndex, setQrIndex]     = useState(0);
-  const [importCode, setImportCode] = useState("");
-  const [status, setStatus]       = useState("");
-  const [loading, setLoading]     = useState(false);
-  const [scanning, setScanning]   = useState(false);
-  const scanVideoRef  = useRef(null);
-  const scanStreamRef = useRef(null);
-  const scanCanvasRef = useRef(null);
-  const scanLoopRef   = useRef(null);
-
-  const stopScan = () => {
-    if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
-    if (scanStreamRef.current) scanStreamRef.current.getTracks().forEach(t => t.stop());
-    scanStreamRef.current = null;
-    setScanning(false);
-  };
-  useEffect(() => () => stopScan(), []);
-
-  const CHUNK_SIZE = 2900; // safe limit for QR binary mode (max 2953)
-
-  const handleExport = async () => {
-    setLoading(true); setStatus("");
-    try {
-      const result = await exportToSyncCode(collection, boxes);
-      if (result.code) {
-        setSyncCode(result.code);
-        // Split into chunks that fit in a QR code
-        const chunks = [];
-        for (let i = 0; i < result.code.length; i += CHUNK_SIZE) {
-          chunks.push(result.code.slice(i, i + CHUNK_SIZE));
-        }
-        const total = chunks.length;
-        const urls = await Promise.all(chunks.map(async (chunk, i) => {
-          // Prefix each chunk: "X/N:data" so scanner knows order
-          const payload = `PT${i+1}/${total}:${chunk}`;
-          return QRCode.toDataURL(payload, {
-            errorCorrectionLevel: "L", margin: 1, width: 300,
-            color: { dark: "#00D4AA", light: "#0a0a0a" },
-          });
-        }));
-        setQrDataUrl(urls); // array of URLs
-      } else {
-        const blob = new Blob([JSON.stringify(result.data, null, 2)], { type:"application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a"); a.href = url; a.download = "mtgtracker-backup.json"; a.click();
-        URL.revokeObjectURL(url);
-        setStatus("Downloaded backup file.");
-      }
-    } catch(e) { setStatus("Export failed: " + e.message); }
-    setLoading(false);
-  };
-
-  const downloadFile = () => {
-    const data = { c: minifyCollection(collection), b: boxes, t: Math.floor(Date.now()/1000), v: 4 };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "mtgtracker-backup.json"; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const startQrScan = async () => {
-    setScanning(true); setStatus("");
-    const chunks = {}; // index -> chunk data
-    let totalChunks = null;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      scanStreamRef.current = stream;
-      scanVideoRef.current.srcObject = stream;
-      await scanVideoRef.current.play();
-      const { default: jsQR } = await import("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js");
-      let lastSeen = "";
-      const loop = () => {
-        const v = scanVideoRef.current, c = scanCanvasRef.current;
-        if (!v || !c || v.readyState < 2) { scanLoopRef.current = requestAnimationFrame(loop); return; }
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        const ctx = c.getContext("2d");
-        ctx.drawImage(v, 0, 0);
-        const img = ctx.getImageData(0, 0, c.width, c.height);
-        const found = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
-        if (found?.data && found.data !== lastSeen) {
-          lastSeen = found.data;
-          const qrData = found.data;
-          // Check if multi-chunk format: "PTX/N:data"
-          const multiMatch = qrData.match(/^PT(\d+)\/(\d+):(.+)$/);
-          if (multiMatch) {
-            const idx = parseInt(multiMatch[1]);
-            const total = parseInt(multiMatch[2]);
-            const chunk = multiMatch[3];
-            totalChunks = total;
-            chunks[idx] = chunk;
-            const got = Object.keys(chunks).length;
-            setStatus(`Scanned ${got} of ${total} QR codes — ${got < total ? `show QR ${got+1}` : "processing..."}`);
-            if (got === total) {
-              // Reassemble
-              let fullCode = "";
-              for (let i = 1; i <= total; i++) fullCode += chunks[i];
-              stopScan();
-              setImportCode(fullCode);
-              setStatus(`All ${total} QR codes scanned! Tap Merge to import.`);
-              return;
-            }
-          } else {
-            // Single QR code (old format or small collection)
-            stopScan();
-            setImportCode(qrData);
-            setStatus("QR scanned! Tap Merge to import.");
-            return;
-          }
-        }
-        scanLoopRef.current = requestAnimationFrame(loop);
-      };
-      scanLoopRef.current = requestAnimationFrame(loop);
-    } catch(_e) { setStatus("Camera access denied."); setScanning(false); }
-  };
-
-  const handleImport = async () => {
-    if (!importCode.trim()) return;
-    setLoading(true); setStatus("");
-    try {
-      let data = null;
-
-      // Try raw JSON first (file upload)
-      try {
-        const parsed = JSON.parse(importCode.trim());
-        // v4 compact JSON file
-        if (parsed.v === 4 && parsed.c) {
-          data = { collection: expandCollection(parsed.c), boxes: parsed.b || [] };
-        }
-        // v3 compact
-        else if (parsed.v === 3 && parsed.c) {
-          data = await importFromSyncCode(importCode.trim());
-        }
-        // Full format (old backups)
-        else if (parsed.collection) {
-          data = parsed;
-        }
-      } catch(_e) {}
-
-      // Try base64 sync code
-      if (!data) data = await importFromSyncCode(importCode.trim());
-
-      if (!data || !data.collection) {
-        setStatus("Invalid code or file. Make sure it's a mtgtracker-backup.json file.");
-        setLoading(false); return;
-      }
-
-      // Dedup: skip cards that already exist with valid card data
-      const existingIds = new Set(
-        collection
-          .filter(i => i.card?.name && i.card.name.length > 0) // only count cards with real data
-          .map(i => i.card.id + "_" + i.condition)
-      );
-      const newCards = (data.collection||[]).filter(i => i.card?.id && !existingIds.has(i.card.id + "_" + i.condition));
-      const existingBoxIds = new Set(boxes.map(b => b.id));
-      const newBoxes = (data.boxes||[]).filter(b => !existingBoxIds.has(b.id));
-
-      if (newCards.length === 0 && newBoxes.length === 0) {
-        setStatus("Everything in this backup is already in your collection — nothing to merge.");
-        setLoading(false); return;
-      }
-
-      onMerge([...collection, ...newCards], [...boxes, ...newBoxes]);
-      setStatus(`✓ Merged ${newCards.length} new card${newCards.length!==1?"s":""} and ${newBoxes.length} new box session${newBoxes.length!==1?"s":""}!`);
-
-      // Background: fetch real card data (images + prices) for imported cards
-      // Don't await — let it run silently after modal shows success
-      if (newCards.length > 0) {
-        setTimeout(async () => {
-          try {
-            const ids = newCards.map(c => c.card.id).filter(Boolean);
-            // Fetch fresh card data from Scryfall in batches of 5 (rate limit friendly)
-            for (let i = 0; i < ids.length; i += 5) {
-              const batch = ids.slice(i, i + 5);
-              const freshCards = (await Promise.all(
-                batch.map(id => scryfallFetch(`/cards/${id}`).then(d => d ? normalizeScryfallCard(d) : null).catch(() => null))
-              )).filter(Boolean);
-              if (freshCards.length > 0 && onEnrichCards) onEnrichCards(freshCards);
-              if (i + 5 < ids.length) await new Promise(r => setTimeout(r, 100));
-            }
-          } catch(_e) {}
-        }, 500);
-      }
-    } catch(e) {
-      console.error("Import error:", e);
-      setStatus("Import failed: " + e.message);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:300,
-      display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-      <div style={{ background:"#111", border:`1px solid ${BORDER}`, borderRadius:24,
-        width:"100%", maxWidth:420, padding:"24px", maxHeight:"92vh", overflowY:"auto" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20, paddingTop:"env(safe-area-inset-top, 0px)" }}>
-          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff", letterSpacing:1 }}>SYNC DEVICES</div>
-          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
-            <Icon.Close size={20} color="#555"/>
-          </button>
-        </div>
-        <div style={{ display:"flex", background:"#1a1a1a", borderRadius:12, padding:4, gap:4, marginBottom:20 }}>
-          {[["export","Export / Backup"],["import","Import / Merge"]].map(([id,label]) => (
-            <button key={id} onClick={()=>{ setTab(id); setSyncCode(""); setQrDataUrl(null); setQrIndex(0); setStatus(""); stopScan(); }} style={{
-              flex:1, padding:"10px 0", background:tab===id?"#fff":"transparent",
-              color:tab===id?"#000":"#555", border:"none", borderRadius:8,
-              fontFamily:"'Bebas Neue',sans-serif", fontSize:13, letterSpacing:1, cursor:"pointer",
-            }}>{label}</button>
-          ))}
-        </div>
-
-        {tab === "export" && (
-          <div>
-            <div style={{ color:"#888", fontSize:13, marginBottom:14, lineHeight:1.6 }}>
-              Generate a QR code — scan it on your other device to merge instantly.
-            </div>
-            <div style={{ background:"#0d0d0d", border:`1px solid ${BORDER}`, borderRadius:12,
-              padding:"12px 16px", marginBottom:14 }}>
-              <div style={{ color:"#555", fontSize:11, marginBottom:2 }}>EXPORTING</div>
-              <div style={{ color:"#fff", fontSize:14 }}>{collection.length} cards · {boxes.length} pack sessions</div>
-            </div>
-            {!qrDataUrl ? (
-              <button onClick={handleExport} disabled={loading} style={{
-                width:"100%", padding:14, background:TEAL, border:"none", borderRadius:14,
-                fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1,
-                color:"#000", cursor:loading?"default":"pointer", marginBottom:10,
-              }}>{loading ? "Generating..." : "GENERATE QR CODE"}</button>
-            ) : (
-              <div>
-                {/* QR slideshow */}
-                <div style={{ background:"#0a0a0a", borderRadius:16, padding:16, marginBottom:12,
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
-                  <img src={qrDataUrl[qrIndex]} alt={`QR ${qrIndex+1}`}
-                    style={{ width:260, height:260, imageRendering:"pixelated" }}/>
-                  {/* Progress dots */}
-                  <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                    {qrDataUrl.map((_, i) => (
-                      <div key={i} onClick={()=>setQrIndex(i)} style={{
-                        width: i===qrIndex ? 20 : 8, height:8, borderRadius:4,
-                        background: i===qrIndex ? TEAL : "#333",
-                        cursor:"pointer", transition:"all 0.2s",
-                      }}/>
-                    ))}
-                  </div>
-                  <div style={{ color:"#555", fontSize:12, textAlign:"center" }}>
-                    {qrDataUrl.length === 1
-                      ? "Scan this QR code on your other device"
-                      : `QR ${qrIndex+1} of ${qrDataUrl.length} — scan each one in order`
-                    }
-                  </div>
-                  {/* Prev/Next */}
-                  {qrDataUrl.length > 1 && (
-                    <div style={{ display:"flex", gap:10, width:"100%" }}>
-                      <button onClick={()=>setQrIndex(i=>Math.max(0,i-1))} disabled={qrIndex===0} style={{
-                        flex:1, padding:"8px 0", background:"#111", border:`1px solid ${BORDER}`,
-                        borderRadius:10, color:qrIndex===0?"#333":"#fff", cursor:qrIndex===0?"default":"pointer",
-                        fontSize:18, fontFamily:"inherit",
-                      }}>‹</button>
-                      <div style={{ flex:2, display:"flex", alignItems:"center", justifyContent:"center",
-                        color:TEAL, fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1 }}>
-                        {qrIndex+1} / {qrDataUrl.length}
-                      </div>
-                      <button onClick={()=>setQrIndex(i=>Math.min(qrDataUrl.length-1,i+1))} disabled={qrIndex===qrDataUrl.length-1} style={{
-                        flex:1, padding:"8px 0", background:"#111", border:`1px solid ${BORDER}`,
-                        borderRadius:10, color:qrIndex===qrDataUrl.length-1?"#333":"#fff",
-                        cursor:qrIndex===qrDataUrl.length-1?"default":"pointer",
-                        fontSize:18, fontFamily:"inherit",
-                      }}>›</button>
-                    </div>
-                  )}
-                </div>
-                <button onClick={()=>{ setSyncCode(""); setQrDataUrl(null); setQrIndex(0); }} style={{
-                  width:"100%", padding:10, background:"none", border:`1px solid ${BORDER}`,
-                  borderRadius:12, color:"#555", fontSize:12, cursor:"pointer",
-                  fontFamily:"inherit", marginBottom:6,
-                }}>Regenerate</button>
-              </div>
-            )}
-            <button onClick={downloadFile} style={{
-              width:"100%", padding:10, marginTop:8, background:"none", border:`1px solid ${BORDER}`,
-              borderRadius:12, color:"#555", fontSize:12, cursor:"pointer", fontFamily:"inherit",
-            }}>Download as JSON file instead</button>
-          </div>
-        )}
-
-        {tab === "import" && (
-          <div>
-            <div style={{ color:"#888", fontSize:13, marginBottom:14, lineHeight:1.6 }}>
-              Scan a QR code from your other device, or paste a sync code.
-            </div>
-            {!scanning ? (
-              <button onClick={startQrScan} style={{
-                width:"100%", padding:14, background:"#0d1f19", border:`1px solid ${TEAL}44`,
-                borderRadius:14, fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1,
-                color:TEAL, cursor:"pointer", marginBottom:12,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:10,
-              }}>
-                <Icon.Camera size={18} color={TEAL}/> SCAN QR CODE
-              </button>
-            ) : (
-              <div style={{ marginBottom:12 }}>
-                <div style={{ position:"relative" }}>
-                  <video ref={scanVideoRef} style={{ width:"100%", borderRadius:12, display:"block" }} playsInline muted/>
-                  <canvas ref={scanCanvasRef} style={{ display:"none" }}/>
-                  <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
-                    <div style={{ width:200, height:200, border:`2px solid ${TEAL}`, borderRadius:12, opacity:0.7 }}/>
-                  </div>
-                  <button onClick={stopScan} style={{
-                    position:"absolute", top:8, right:8, background:"rgba(0,0,0,0.7)",
-                    border:"none", borderRadius:20, padding:"6px 12px",
-                    color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"inherit",
-                  }}>Cancel</button>
-                </div>
-                {status && (
-                  <div style={{ marginTop:8, padding:"8px 12px", background:"#0d1f19",
-                    borderRadius:10, color:TEAL, fontSize:12, textAlign:"center" }}>
-                    {status}
-                  </div>
-                )}
-              </div>
-            )}
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
-              <div style={{ flex:1, height:1, background:"#222" }}/>
-              <span style={{ color:"#444", fontSize:11 }}>or paste / upload</span>
-              <div style={{ flex:1, height:1, background:"#222" }}/>
-            </div>
-            {/* File upload for mobile */}
-            <label style={{
-              display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-              width:"100%", padding:12, background:"#111", border:`1px solid ${BORDER}`,
-              borderRadius:12, color:"#888", fontSize:13, cursor:"pointer",
-              fontFamily:"inherit", marginBottom:10, boxSizing:"border-box",
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              Upload JSON backup file
-              <input type="file" accept=".json,application/json" style={{ display:"none" }}
-                onChange={e => {
-                  const f = e.target.files[0]; if (!f) return;
-                  const r = new FileReader();
-                  r.onload = ev => { setImportCode(ev.target.result); setStatus("File loaded — tap Merge to import."); };
-                  r.readAsText(f);
-                  e.target.value = ""; // reset so same file can be re-selected
-                }}/>
-            </label>
-            <textarea value={importCode} onChange={e=>setImportCode(e.target.value)}
-              placeholder="Paste sync code or JSON backup..."
-              style={{ width:"100%", minHeight:80, padding:12, background:"#0d0d0d",
-                border:`1px solid ${BORDER}`, borderRadius:12, color:"#ccc", fontSize:12,
-                fontFamily:"monospace", outline:"none", resize:"vertical",
-                boxSizing:"border-box", marginBottom:12 }}/>
-            <button onClick={handleImport} disabled={loading||!importCode.trim()} style={{
-              width:"100%", padding:14,
-              background:importCode.trim()?TEAL:"#1a1a1a", border:"none", borderRadius:14,
-              fontFamily:"'Bebas Neue',sans-serif", fontSize:16, letterSpacing:1,
-              color:importCode.trim()?"#000":"#444", cursor:importCode.trim()?"pointer":"default",
-            }}>{loading?"Importing...":"MERGE INTO COLLECTION"}</button>
-          </div>
-        )}
-
-        {status && (
-          <div style={{ marginTop:12, padding:"10px 14px", background:"#1a1a1a", borderRadius:10,
-            color: status.includes("fail")||status.includes("Invalid")||status.includes("denied") ? "#ef4444" : TEAL,
-            fontSize:12, textAlign:"center" }}>{status}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
 // ── PIN Lock ──────────────────────────────────────────────────────────────────
 // Global crash logger
 if (typeof window !== "undefined") {
@@ -4266,7 +3782,7 @@ function RangeBar({ active, onChange }) {
 }
 
 // ── Home View ─────────────────────────────────────────────────────────────────
-function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onSync, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
+function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onBrowseSet, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
   const [showVal,      setShowVal]      = useState(true);
   const [newSets,      setNewSets]      = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -4448,7 +3964,6 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
                   {[
                     { label:"Export CSV", sub:"Spreadsheet of your collection", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>, action: () => { onExportCSV(); setSettingsOpen(false); } },
                     { label:"Full Backup", sub:"JSON export of everything", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>, action: () => { onExportBackup(); setSettingsOpen(false); } },
-                    { label:"Sync Devices", sub:"QR code device sync", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 4v5h5M20 20v-5h-5" stroke="#888" strokeWidth="2" strokeLinecap="round"/><path d="M20 9a8 8 0 00-14.93-2M4 15a8 8 0 0014.93 2" stroke="#888" strokeWidth="2" strokeLinecap="round"/></svg>, action: () => { onSync(); setSettingsOpen(false); } },
                   ].map(({ label, sub, icon, action }) => (
                     <button key={label} onClick={action}
                       style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
@@ -4499,7 +4014,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
             const thirtyAgo = new Date(Date.now()-30*864e5).toISOString().slice(0,10);
             const isNew = !isUpcoming && relDate >= thirtyAgo;
             return (
-              <div key={set.id} onClick={() => window.open(`https://scryfall.com/sets/${set.id}`, "_blank")}
+              <div key={set.id} onClick={() => onBrowseSet && onBrowseSet(set)}
                 style={{ flexShrink:0, width:130, background:CARD, border:`1px solid ${isNew?TEAL+"44":BORDER}`,
                   borderRadius:12, overflow:"hidden", cursor:"pointer", position:"relative" }}>
                 {/* Card art banner */}
@@ -5474,6 +4989,331 @@ function SearchView({ onCardPress, onAdd }) {
                   <button key={key} onClick={() => setCondition(key)} style={{
                     background: condition===key ? condColors[key]+"18" : "#0d0d0d",
                     border: `2px solid ${condition===key ? condColors[key] : BORDER}`,
+                    borderRadius:10, padding:"9px 12px", textAlign:"left", cursor:"pointer" }}>
+                    <div style={{ color:condColors[key], fontSize:10, fontWeight:700 }}>{label}</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:16,
+                      color: condition===key ? "#fff" : "#555", letterSpacing:1 }}>
+                      {price > 0 ? fmt(price) : "—"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ color:"#888", fontSize:11, letterSpacing:0.5, marginBottom:6 }}>PRICE PAID (optional)</div>
+            <input type="number" inputMode="decimal" placeholder="0.00"
+              value={costPaid} onChange={e => setCostPaid(e.target.value)}
+              style={{ width:"100%", padding:"12px 14px", background:"#0d0d0d",
+                border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
+                fontSize:15, fontFamily:"inherit", outline:"none",
+                boxSizing:"border-box", marginBottom:16 }}/>
+            <button onClick={handleAdd} style={{ width:"100%", padding:15, background:TEAL,
+              border:"none", borderRadius:14, fontFamily:"'Bebas Neue',sans-serif",
+              fontSize:18, letterSpacing:1, color:"#000", cursor:"pointer", marginBottom:8 }}>
+              ADD TO COLLECTION
+            </button>
+            <button onClick={() => setAddingCard(null)} style={{ width:"100%", padding:10,
+              background:"none", border:"none", color:"#555", fontSize:13,
+              cursor:"pointer", fontFamily:"inherit" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Set Browse View ───────────────────────────────────────────────────────────
+function SetBrowseView({ setInfo, onBack, onCardPress }) {
+  const [cards, setCards]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter]   = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSetCards(setInfo.id).then(c => {
+      if (!cancelled) { setCards(c); setLoading(false); }
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [setInfo.id]);
+
+  const q = filter.toLowerCase();
+  const visible = q
+    ? cards.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.number === q ||
+        (c.type_line || "").toLowerCase().includes(q)
+      )
+    : cards;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+      <div style={{ padding:"14px 16px 10px", borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+          <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer",
+            padding:4, display:"flex", alignItems:"center" }}>
+            <Icon.Back size={22} color="#888"/>
+          </button>
+          {setInfo.symbol && (
+            <img src={setInfo.symbol} alt={setInfo.name}
+              style={{ width:22, height:22, objectFit:"contain", filter:"brightness(0) invert(0.6)" }}/>
+          )}
+          <div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:"#fff", letterSpacing:1, lineHeight:1 }}>
+              {setInfo.name}
+            </div>
+            <div style={{ color:"#555", fontSize:11, marginTop:1 }}>
+              {cards.length > 0 ? cards.length : (setInfo.total || "?")} cards · {setInfo.releaseDate}
+            </div>
+          </div>
+        </div>
+        <div style={{ position:"relative" }}>
+          <div style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)" }}>
+            <Icon.Search size={14} color="#555"/>
+          </div>
+          <input value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder="Filter by name, number or type..."
+            style={{ width:"100%", padding:"9px 12px 9px 30px", background:CARD,
+              border:`1px solid ${BORDER}`, borderRadius:10, color:"#fff",
+              fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+        </div>
+      </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"12px 16px", WebkitOverflowScrolling:"touch" }}>
+        {loading ? (
+          <div style={{ display:"flex", justifyContent:"center", padding:60 }}>
+            <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+          </div>
+        ) : (
+          <>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))", gap:10 }}>
+              {visible.map(card => (
+                <div key={card.id} onClick={() => onCardPress(card)}
+                  style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:10,
+                    overflow:"hidden", cursor:"pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = TEAL+"44"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
+                  <div style={{ background:"#0d0d0d", display:"flex", justifyContent:"center", padding:6 }}>
+                    <img src={card.images?.small} alt={card.name} loading="lazy"
+                      style={{ height:90, objectFit:"contain" }}/>
+                  </div>
+                  <div style={{ padding:"5px 7px 7px" }}>
+                    <div style={{ color:"#fff", fontSize:10, fontWeight:600, lineHeight:1.2,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{card.name}</div>
+                    <div style={{ color:"#555", fontSize:9, marginTop:1 }}>#{card.number}</div>
+                    {card.prices?.usd && (
+                      <div style={{ color:TEAL, fontSize:10, marginTop:2, fontFamily:"'Bebas Neue',sans-serif" }}>
+                        ${card.prices.usd}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {visible.length === 0 && (
+              <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No cards found</div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Card Browse Detail View ───────────────────────────────────────────────────
+const BROWSE_LEGALITY_FORMATS = [
+  ["Standard","standard"], ["Pioneer","pioneer"], ["Modern","modern"],
+  ["Legacy","legacy"],     ["Commander","commander"], ["Vintage","vintage"],
+  ["Pauper","pauper"],     ["Historic","historic"],
+];
+
+function browsRarityColor(r) {
+  if (!r) return "#888";
+  const l = r.toLowerCase();
+  if (l === "mythic")   return "#f97316";
+  if (l === "rare")     return "#f59e0b";
+  if (l === "uncommon") return "#94a3b8";
+  return "#888";
+}
+
+function CardBrowseDetailView({ card, onBack, onAdd }) {
+  const [addingCard, setAddingCard] = useState(null);
+  const [condition, setCondition]   = useState("near_mint");
+  const [acqType, setAcqType]       = useState("bought");
+  const [costPaid, setCostPaid]     = useState("");
+
+  const handleAdd = () => {
+    if (!addingCard) return;
+    onAdd(addingCard, condition, { acqType, costPaid: costPaid ? parseFloat(costPaid) : null });
+    setAddingCard(null); setCostPaid(""); setCondition("near_mint");
+  };
+
+  const p = card.prices || {};
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", overflowY:"auto",
+      WebkitOverflowScrolling:"touch" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px 12px",
+        borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer",
+          padding:4, display:"flex", alignItems:"center" }}>
+          <Icon.Back size={22} color="#888"/>
+        </button>
+        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"#fff",
+          letterSpacing:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {card.name}
+        </div>
+      </div>
+
+      <div style={{ padding:"16px 16px 120px" }}>
+        {/* Card image */}
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:16 }}>
+          <img
+            src={card.images?.large || card.images?.normal || card.images?.small}
+            alt={card.name}
+            style={{ width:"min(100%, 260px)", borderRadius:12,
+              boxShadow:"0 8px 32px rgba(0,0,0,0.6)" }}/>
+        </div>
+
+        {/* Oracle text card */}
+        <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+          padding:"14px 16px", marginBottom:12 }}>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff",
+            letterSpacing:0.5, marginBottom:2 }}>{card.name}</div>
+          {card.mana_cost && (
+            <div style={{ color:"#888", fontSize:12, marginBottom:6 }}>{card.mana_cost}</div>
+          )}
+          {card.type_line && (
+            <div style={{ color:"#aaa", fontSize:13, fontStyle:"italic", marginBottom:8,
+              paddingBottom:8, borderBottom:`1px solid ${BORDER}` }}>
+              {card.type_line}
+            </div>
+          )}
+          {card.oracle_text && (
+            <div style={{ color:"#ccc", fontSize:13, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+              {card.oracle_text}
+            </div>
+          )}
+        </div>
+
+        {/* Print info */}
+        <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+          padding:"12px 16px", marginBottom:12 }}>
+          <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>PRINT</div>
+          <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+            <div>
+              <div style={{ color:"#555", fontSize:10 }}>Set</div>
+              <div style={{ color:"#fff", fontSize:13 }}>{card.set?.name}</div>
+            </div>
+            <div>
+              <div style={{ color:"#555", fontSize:10 }}>Number</div>
+              <div style={{ color:"#fff", fontSize:13 }}>#{card.number}</div>
+            </div>
+            <div>
+              <div style={{ color:"#555", fontSize:10 }}>Rarity</div>
+              <div style={{ color:browsRarityColor(card.rarity), fontSize:13, textTransform:"capitalize" }}>
+                {card.rarity}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Prices */}
+        {(p.usd || p.usd_foil || p.eur || p.tix) && (
+          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+            padding:"12px 16px", marginBottom:12 }}>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>PRICES</div>
+            <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+              {p.usd && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>USD</div>
+                  <div style={{ color:TEAL, fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd}</div>
+                </div>
+              )}
+              {p.usd_foil && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>USD Foil</div>
+                  <div style={{ color:"#f59e0b", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd_foil}</div>
+                </div>
+              )}
+              {p.eur && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>EUR</div>
+                  <div style={{ color:"#aaa", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>€{p.eur}</div>
+                </div>
+              )}
+              {p.tix && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>TIX</div>
+                  <div style={{ color:"#aaa", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>{p.tix}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Legalities */}
+        {card.legalities && Object.keys(card.legalities).length > 0 && (
+          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+            padding:"12px 16px", marginBottom:12 }}>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>LEGALITY</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 12px" }}>
+              {BROWSE_LEGALITY_FORMATS.map(([label, key]) => {
+                const status = card.legalities[key] || "not_legal";
+                const isLegal = status === "legal";
+                return (
+                  <div key={key} style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <div style={{ width:44, padding:"2px 0", textAlign:"center", borderRadius:4, flexShrink:0,
+                      background: isLegal ? "#16a34a22" : "#1a1a1a",
+                      border:`1px solid ${isLegal ? "#16a34a" : "#2a2a2a"}`,
+                      color: isLegal ? "#4ade80" : "#3a3a3a", fontSize:9, fontWeight:700 }}>
+                      {isLegal ? "LEGAL" : "NOT"}
+                    </div>
+                    <span style={{ color: isLegal ? "#ccc" : "#444", fontSize:12 }}>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sticky add button */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, padding:"12px 16px 36px",
+        background:"linear-gradient(transparent, #0a0a0a 40%)", pointerEvents:"none" }}>
+        <button onClick={() => setAddingCard(card)}
+          style={{ width:"100%", padding:15, background:TEAL, border:"none", borderRadius:14,
+            fontFamily:"'Bebas Neue',sans-serif", fontSize:18, letterSpacing:1,
+            color:"#000", cursor:"pointer", pointerEvents:"auto" }}>
+          + ADD TO COLLECTION
+        </button>
+      </div>
+
+      {/* Add card modal — reuses SearchView's pattern */}
+      {addingCard && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:300,
+          display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+          onClick={e => { if (e.target === e.currentTarget) setAddingCard(null); }}>
+          <div style={{ background:"#111", borderRadius:"20px 20px 0 0", padding:"20px 20px 100px",
+            borderTop:`1px solid ${BORDER}`, maxHeight:"85vh", overflowY:"auto", width:"100%" }}>
+            <div style={{ display:"flex", gap:14, alignItems:"center", marginBottom:20 }}>
+              <img src={addingCard.images?.small} alt={addingCard.name}
+                style={{ height:80, borderRadius:8, flexShrink:0 }}/>
+              <div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:"#fff" }}>{addingCard.name}</div>
+                <div style={{ color:"#555", fontSize:12 }}>{addingCard.set?.name} · #{addingCard.number}</div>
+              </div>
+            </div>
+            <div style={{ color:"#888", fontSize:11, letterSpacing:0.5, marginBottom:8 }}>CONDITION</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+              {Object.entries(condLabels).map(([key, label]) => {
+                const price = getPrices(addingCard).raw[key] || 0;
+                return (
+                  <button key={key} onClick={() => setCondition(key)} style={{
+                    background: condition===key ? condColors[key]+"18" : "#0d0d0d",
+                    border:`2px solid ${condition===key ? condColors[key] : BORDER}`,
                     borderRadius:10, padding:"9px 12px", textAlign:"left", cursor:"pointer" }}>
                     <div style={{ color:condColors[key], fontSize:10, fontWeight:700 }}>{label}</div>
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:16,
@@ -9027,6 +8867,8 @@ function App() {
   const [dupeCard, setDupeCard]     = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);
   const [detail, setDetail]         = useState(null);
+  const [browseSet, setBrowseSet]   = useState(null);
+  const [browseCard, setBrowseCard] = useState(null);
   const [collSubTab, setCollSubTab]   = useState("collection");
   const [masterSetId, setMasterSetId] = useState(null);
   const [collSort, setCollSort]       = useState("date_desc");
@@ -9163,7 +9005,6 @@ function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, collection.length]);
-  const [syncModal, setSyncModal]                 = useState(false);
 
   useEffect(()=>{
     purgeBadPriceCache();
@@ -9292,12 +9133,6 @@ function App() {
       await saveCollection(saved);
       setDetail(saved.find(i=>i.id===id) || null);
     }
-  };
-
-  const handleMerge = async (mergedCol, mergedBoxes) => {
-    setCol(mergedCol); await saveCollection(mergedCol);
-    setBoxes(mergedBoxes); saveBoxes(mergedBoxes);
-    setSyncModal(false);
   };
 
   const handleImport = async (items) => {
@@ -9508,30 +9343,8 @@ function App() {
     <div style={{ flex:1, display:'flex', overflow:'hidden', background:'#0a0a0a' }}>
 
         {/* Desktop sidebar — only on wide screens */}
-        {isDesktop && <DesktopSidebar tabs={tabs} tab={tab} setTab={setTab} setScanning={setScanning} collection={collection} onSync={()=>setSyncModal(true)}
-          onNavigate={(id) => { setTab(id); setDetail(null); setActiveBox(null); setActiveSetName(null); }}/>}
-
-      {/* Sync overlay */}
-      {syncModal && (
-        <SyncModal
-          collection={collection}
-          boxes={boxes}
-          onMerge={handleMerge}
-          onClose={()=>setSyncModal(false)}
-          onEnrichCards={async (freshCards) => {
-            setCol(prev => {
-              const updated = prev.map(item => {
-                const fresh = freshCards.find(f => f.id === item.card.id);
-                if (!fresh) return item;
-                recordPriceSnapshot(fresh);
-                return { ...item, card: fresh };
-              });
-              saveCollection(updated);
-              return updated;
-            });
-          }}
-        />
-      )}
+        {isDesktop && <DesktopSidebar tabs={tabs} tab={tab} setTab={setTab} setScanning={setScanning} collection={collection}
+          onNavigate={(id) => { setTab(id); setDetail(null); setBrowseSet(null); setBrowseCard(null); setActiveBox(null); setActiveSetName(null); }}/>}
 
         {/* Main content area */}
         <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0,
@@ -9556,6 +9369,18 @@ function App() {
                   setDetail(updatedItem);
                 }}
               />
+            ) : browseCard ? (
+              <CardBrowseDetailView
+                card={browseCard}
+                onBack={() => setBrowseCard(null)}
+                onAdd={addCard}
+              />
+            ) : browseSet ? (
+              <SetBrowseView
+                setInfo={browseSet}
+                onBack={() => setBrowseSet(null)}
+                onCardPress={card => setBrowseCard(card)}
+              />
             ) : tab==="home" ? (
               <div style={{ height:"100%", display:"flex", flexDirection:"column" }}>
                 {crashLog && (
@@ -9576,7 +9401,7 @@ function App() {
                   </div>
                 )}
                 <div style={{ flex:1, overflow:"hidden" }}>
-                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onSync={()=>setSyncModal(true)} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
+                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
                 </div>
               </div>
             ) : tab==="search" ? (
@@ -9821,7 +9646,7 @@ function App() {
                 );
                 return (
                   <button key={t.id}
-                    onClick={t.action||(() => { setTab(t.id); setDetail(null); setActiveBox(null); setActiveSetName(null); if(t.id!=="collection"&&t.id!=="decks"){setCollSubTab("collection");setMasterSetId(null);} })}
+                    onClick={t.action||(() => { setTab(t.id); setDetail(null); setBrowseSet(null); setBrowseCard(null); setActiveBox(null); setActiveSetName(null); if(t.id!=="collection"&&t.id!=="decks"){setCollSubTab("collection");setMasterSetId(null);} })}
                     style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4,
                       background:'none', border:'none', cursor:'pointer', padding:'8px 0 4px' }}>
                     <TabIcon size={22} color={active?TEAL:"#444"}/>
