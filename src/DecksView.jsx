@@ -405,8 +405,10 @@ function parseArchidektTxt(text) {
 }
 
 async function scryfallBatchLookup(entries, onProgress) {
-  const results = [];
+  const resultMap = new Map(); // entry.name -> card
   const CHUNK = 75;
+
+  // Pass 1: lookup by set + collector_number
   for (let i = 0; i < entries.length; i += CHUNK) {
     const chunk = entries.slice(i, i + CHUNK);
     const identifiers = chunk.map(e => ({ set: e.set, collector_number: e.number }));
@@ -421,19 +423,44 @@ async function scryfallBatchLookup(entries, onProgress) {
         const found = data.data || [];
         for (const entry of chunk) {
           const card = found.find(c => c.set === entry.set && c.collector_number === entry.number)
-            || found.find(c => c.name.toLowerCase() === entry.name.toLowerCase());
-          results.push({ entry, card: card || null });
+            || found.find(c => c.name.split(" // ")[0].toLowerCase() === entry.name.split(" // ")[0].toLowerCase());
+          if (card) resultMap.set(entry.name, card);
         }
-      } else {
-        for (const entry of chunk) results.push({ entry, card: null });
       }
-    } catch {
-      for (const entry of chunk) results.push({ entry, card: null });
-    }
-    onProgress?.(Math.min(i + CHUNK, entries.length), entries.length);
+    } catch { /* will retry by name */ }
+    onProgress?.(Math.round((i + CHUNK) / entries.length * 60), 100);
     if (i + CHUNK < entries.length) await new Promise(r => setTimeout(r, 150));
   }
-  return results;
+
+  // Pass 2: name-based fallback for anything still missing
+  const missing = entries.filter(e => !resultMap.has(e.name));
+  if (missing.length > 0) {
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const chunk = missing.slice(i, i + CHUNK);
+      const identifiers = chunk.map(e => ({ name: e.name.split(" // ")[0] }));
+      try {
+        const res = await fetch("https://api.scryfall.com/cards/collection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "User-Agent": "MTGTracker/1.0" },
+          body: JSON.stringify({ identifiers }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const found = data.data || [];
+          for (const entry of chunk) {
+            const frontName = entry.name.split(" // ")[0].toLowerCase();
+            const card = found.find(c => c.name.split(" // ")[0].toLowerCase() === frontName);
+            if (card) resultMap.set(entry.name, card);
+          }
+        }
+      } catch { /* card stays missing */ }
+      onProgress?.(60 + Math.round((i + CHUNK) / missing.length * 40), 100);
+      if (i + CHUNK < missing.length) await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  onProgress?.(100, 100);
+  return entries.map(entry => ({ entry, card: resultMap.get(entry.name) || null }));
 }
 
 // ── Import Modal ──────────────────────────────────────────────────────────────
@@ -469,7 +496,7 @@ function ImportModal({ initialText, onClose, onImported }) {
   const runLookup = async () => {
     if (!parsed?.entries?.length) return;
     setStep("loading");
-    const res = await scryfallBatchLookup(parsed.entries, (done, total) => setProgress([done, total]));
+    const res = await scryfallBatchLookup(parsed.entries, (pct) => setProgress([pct, 100]));
     setResults(res);
     setStep("confirm");
   };
@@ -606,12 +633,12 @@ function ImportModal({ initialText, onClose, onImported }) {
               FETCHING CARD DATA
             </div>
             <div style={{ color:"#555", fontSize:13, marginBottom:20 }}>
-              {progress[0]} / {progress[1]} cards
+              {progress[0] <= 60 ? "Looking up by set & number…" : "Resolving remaining cards by name…"}
             </div>
             <div style={{ height:6, background:"#1a1a1a", borderRadius:3, overflow:"hidden" }}>
               <div style={{
                 height:"100%", background:TEAL, borderRadius:3, transition:"width 0.3s",
-                width: progress[1] > 0 ? `${Math.min(100,(progress[0]/progress[1])*100)}%` : "0%",
+                width: `${progress[0]}%`,
               }}/>
             </div>
           </div>
@@ -685,7 +712,36 @@ function PortfolioTab({ collection, decks, onAddToDeck }) {
   const [tagFilter, setTagFilter]   = useState(new Set());
   const [addingCard, setAddingCard] = useState(null);
 
-  const activeCards = (collection || []).filter(i => !i.sold);
+  // Merge collection + deck cards into a unified portfolio, deduped by card.id
+  const activeCards = useMemo(() => {
+    const seen = new Set();
+    const items = [];
+    // 1. Main collection (exclude sold)
+    for (const item of (collection || [])) {
+      if (item.sold) continue;
+      if (!item.card?.id) continue;
+      seen.add(item.card.id);
+      items.push(item);
+    }
+    // 2. Cards in decks that aren't already in the collection
+    for (const deck of (decks || [])) {
+      const deckCards = deck.cards || [];
+      for (const dc of deckCards) {
+        const card = dc.card;
+        if (!card?.id || seen.has(card.id)) continue;
+        seen.add(card.id);
+        items.push({
+          id: `deck-${deck.id}-${card.id}`,
+          card,
+          condition: "near_mint",
+          foil: dc.foil || false,
+          autoTags: computeAutoTags(card),
+          _deckSource: deck.name || "Deck",
+        });
+      }
+    }
+    return items;
+  }, [collection, decks]);
 
   const toggleColor = (c) => setColorFilter(prev => {
     const next = new Set(prev); next.has(c) ? next.delete(c) : next.add(c); return next;
@@ -780,7 +836,7 @@ function PortfolioTab({ collection, decks, onAddToDeck }) {
       <div style={{ flex:1, overflowY:"auto", padding:"8px 16px 20px" }}>
         {activeCards.length === 0 ? (
           <div style={{ textAlign:"center", padding:"50px 20px", color:"#333" }}>
-            <div style={{ fontSize:13 }}>No cards in your collection yet.</div>
+            <div style={{ fontSize:13 }}>No cards yet — add cards to your collection or import a deck.</div>
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign:"center", padding:"40px 20px", color:"#333" }}>
@@ -807,7 +863,14 @@ function PortfolioTab({ collection, decks, onAddToDeck }) {
                       overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                       {card?.name}
                     </div>
-                    <div style={{ display:"flex", gap:4, marginTop:3, flexWrap:"wrap" }}>
+                    <div style={{ display:"flex", gap:4, marginTop:3, flexWrap:"wrap", alignItems:"center" }}>
+                      {item._deckSource && (
+                        <span style={{ fontSize:9, padding:"1px 5px", borderRadius:10,
+                          background:"#00D4AA22", border:"1px solid #00D4AA44", color:TEAL,
+                          whiteSpace:"nowrap" }}>
+                          {item._deckSource}
+                        </span>
+                      )}
                       {tags.map(tag => {
                         const meta = getTagMeta(tag);
                         const tc = meta?.color || "#555";
