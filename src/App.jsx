@@ -247,7 +247,7 @@ function normalizeScryfallCard(c) {
       normal: imgUris.normal || "",
       art_crop: imgUris.art_crop || "",
     },
-    prices: c.prices || {},            // { usd, usd_foil, eur, eur_foil, tix }
+    prices: c.prices || {},
     tcgplayer_id: c.tcgplayer_id || null,
     scryfall_uri: c.scryfall_uri || "",
     oracle_text:  c.oracle_text || faces?.[0]?.oracle_text || "",
@@ -257,6 +257,17 @@ function normalizeScryfallCard(c) {
     color_identity: c.color_identity || [],
     keywords:     c.keywords || [],
     legalities:   c.legalities || {},
+    card_faces:   faces ? faces.map(f => ({
+      name:        f.name        || "",
+      mana_cost:   f.mana_cost   || "",
+      type_line:   f.type_line   || "",
+      oracle_text: f.oracle_text || "",
+    })) : null,
+    purchase_uris: c.purchase_uris || null,
+    artist:        c.artist        || faces?.[0]?.artist || "",
+    finishes:      c.finishes      || [],
+    promo_types:   c.promo_types   || [],
+    released_at:   c.released_at   || "",
   };
 }
 
@@ -4796,7 +4807,23 @@ function CardDetailView({ item, onBack, onRemove, onMarkSold, onUpdateCard, trad
 }
 
 // ── Search View ───────────────────────────────────────────────────────────────
-function SearchView({ onCardPress, onAdd }) {
+const SET_TYPE_LABEL = {
+  expansion:"Expansion", core:"Core Set", masters:"Masters",
+  commander:"Commander", commander_deck:"Commander", draft_innovation:"Draft",
+  from_the_vault:"From the Vault", premium_deck:"Premium Deck", duel_deck:"Duel Deck",
+  box:"Box Set", starter:"Starter", universes_beyond:"Universes Beyond",
+  alchemy:"Alchemy", planechase:"Planechase", archenemy:"Archenemy",
+  spellbook:"Spellbook", arsenal:"Arsenal", funny:"Un-Set",
+};
+const SET_TYPE_COLOR = {
+  expansion:TEAL, core:TEAL, draft_innovation:TEAL,
+  masters:"#f59e0b", from_the_vault:"#f59e0b", premium_deck:"#f59e0b", duel_deck:"#f59e0b",
+  commander:"#4ade80", commander_deck:"#4ade80", planechase:"#4ade80", archenemy:"#4ade80",
+  universes_beyond:"#a78bfa", funny:"#f472b6",
+  alchemy:"#60a5fa",
+};
+
+function SearchView({ onCardPress, onAdd, onBrowseSet }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -4807,8 +4834,32 @@ function SearchView({ onCardPress, onAdd }) {
   const [costPaid, setCostPaid] = useState("");
   const [cardsMeta, setCardsMeta] = useState(null);
   const [workerReady, setWorkerReady] = useState(false);
+  const [allSets, setAllSets] = useState([]);
+  const [setsLoading, setSetsLoading] = useState(true);
   const workerRef = useRef(null);
   const reqIdRef  = useRef(0);
+
+  // Load all sets for the browse grid
+  useEffect(() => {
+    const CACHE_KEY = "search_all_sets_v2";
+    try {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) { setAllSets(JSON.parse(cached)); setSetsLoading(false); return; }
+    } catch {}
+    scryfallFetch("/sets").then(data => {
+      if (!data?.data) return;
+      const EXCLUDE = new Set(["token","memorabilia","minigame","vanguard","treasure_chest","promo"]);
+      const sets = data.data
+        .filter(s => !s.digital && s.card_count >= 5 && !EXCLUDE.has(s.set_type))
+        .map(s => ({
+          id: s.code, name: s.name, symbol: s.icon_svg_uri,
+          releaseDate: s.released_at, total: s.card_count, series: s.set_type,
+        }))
+        .sort((a, b) => b.releaseDate.localeCompare(a.releaseDate));
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(sets)); } catch {}
+      setAllSets(sets);
+    }).catch(() => {}).finally(() => setSetsLoading(false));
+  }, []);
 
   // Spin up search worker once
   useEffect(() => {
@@ -4912,8 +4963,8 @@ function SearchView({ onCardPress, onAdd }) {
   };
 
   return (
-    <div style={{ display:"flex", flexDirection:"column" }}>
-      <div style={{ padding:"14px 20px 12px", borderBottom:`1px solid ${BORDER}` }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+      <div style={{ padding:"14px 20px 12px", borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
         <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#fff",
           letterSpacing:1, marginBottom:12 }}>SEARCH CARDS</div>
         <div style={{ position:"relative" }}>
@@ -4928,40 +4979,93 @@ function SearchView({ onCardPress, onAdd }) {
             style={{ width:"100%", padding:"11px 12px 11px 36px", background:CARD,
               border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
               fontSize:16, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+          {q && (
+            <button onClick={() => setQ("")} style={{ position:"absolute", right:10, top:"50%",
+              transform:"translateY(-50%)", background:"none", border:"none",
+              color:"#555", cursor:"pointer", fontSize:20, lineHeight:1, padding:"0 4px" }}>×</button>
+          )}
         </div>
       </div>
-      <div style={{ padding:"12px 16px" }}>
-        {loading && (
-          <div style={{ display:"flex", justifyContent:"center", padding:40 }}>
-            <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
-              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-          </div>
-        )}
-        {!loading && searched && results.length === 0 && (
-          <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No results found</div>
-        )}
-        {!loading && results.length > 0 && (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12 }}>
-            {results.map(card => (
-              <div key={card.id} onClick={() => setAddingCard(card)}
-                style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
-                  overflow:"hidden", cursor:"pointer", transition:"border-color 0.15s" }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = TEAL+"44"}
-                onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
-                <div style={{ background:"#0d0d0d", display:"flex", justifyContent:"center", padding:8 }}>
-                  <img src={card.images?.small} alt={card.name}
-                    style={{ height:100, objectFit:"contain" }}/>
-                </div>
-                <div style={{ padding:"8px 10px 10px" }}>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:14, color:"#fff" }}>{card.name}</div>
-                  <div style={{ color:"#555", fontSize:10, marginTop:2 }}>{card.set?.name}</div>
-                  <div style={{ color:TEAL, fontSize:11, marginTop:4, fontFamily:"'Bebas Neue',sans-serif" }}>
-                    + ADD
-                  </div>
-                </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"12px 16px", minHeight:0, WebkitOverflowScrolling:"touch" }}>
+        {/* Sets browser — shown when no query is active */}
+        {!q.trim() && (
+          setsLoading ? (
+            <div style={{ display:"flex", justifyContent:"center", padding:48 }}>
+              <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+                borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+            </div>
+          ) : (
+            <>
+              <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:12 }}>
+                {allSets.length} SETS · CLICK TO BROWSE CARDS
               </div>
-            ))}
-          </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:10 }}>
+                {allSets.map(set => {
+                  const color = SET_TYPE_COLOR[set.series] || "#555";
+                  const label = SET_TYPE_LABEL[set.series] || set.series;
+                  return (
+                    <div key={set.id} onClick={() => onBrowseSet && onBrowseSet(set)}
+                      style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12,
+                        padding:"12px 14px", cursor:"pointer", transition:"border-color 0.15s" }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = color + "66"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                        {set.symbol && (
+                          <img src={set.symbol} alt=""
+                            style={{ width:20, height:20, filter:"invert(1) sepia(1) saturate(0) brightness(0.6)", flexShrink:0 }}/>
+                        )}
+                        <span style={{ background:color+"22", color:color, fontSize:9, fontWeight:700,
+                          padding:"2px 6px", borderRadius:4, letterSpacing:0.5, textTransform:"uppercase" }}>
+                          {label}
+                        </span>
+                      </div>
+                      <div style={{ color:"#fff", fontSize:12, fontWeight:600, lineHeight:1.3, marginBottom:4 }}>{set.name}</div>
+                      <div style={{ color:"#555", fontSize:10 }}>{set.total} cards · {set.releaseDate?.slice(0,4)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )
+        )}
+
+        {/* Search results — shown when a query is active */}
+        {q.trim() && (
+          <>
+            {loading && (
+              <div style={{ display:"flex", justifyContent:"center", padding:40 }}>
+                <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+                  borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+              </div>
+            )}
+            {!loading && searched && results.length === 0 && (
+              <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No results found</div>
+            )}
+            {!loading && results.length > 0 && (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12 }}>
+                {results.map(card => (
+                  <div key={card.id} onClick={() => onCardPress && onCardPress(card)}
+                    style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+                      overflow:"hidden", cursor:"pointer", transition:"border-color 0.15s" }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = TEAL+"44"}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
+                    <div style={{ background:"#0d0d0d", display:"flex", justifyContent:"center", padding:8 }}>
+                      <img src={card.images?.small} alt={card.name}
+                        style={{ height:100, objectFit:"contain" }}/>
+                    </div>
+                    <div style={{ padding:"8px 10px 10px" }}>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:14, color:"#fff" }}>{card.name}</div>
+                      <div style={{ color:"#555", fontSize:10, marginTop:2 }}>{card.set?.name}</div>
+                      <div style={{ color:TEAL, fontSize:11, marginTop:4, fontFamily:"'Bebas Neue',sans-serif" }}>
+                        VIEW CARD
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -5123,18 +5227,90 @@ function SetBrowseView({ setInfo, onBack, onCardPress }) {
 
 // ── Card Browse Detail View ───────────────────────────────────────────────────
 const BROWSE_LEGALITY_FORMATS = [
-  ["Standard","standard"], ["Pioneer","pioneer"], ["Modern","modern"],
-  ["Legacy","legacy"],     ["Commander","commander"], ["Vintage","vintage"],
-  ["Pauper","pauper"],     ["Historic","historic"],
+  ["Standard","standard"], ["Pioneer","pioneer"],   ["Modern","modern"],
+  ["Legacy","legacy"],     ["Commander","commander"],["Vintage","vintage"],
+  ["Pauper","pauper"],     ["Historic","historic"],  ["Timeless","timeless"],
+  ["Oathbreaker","oathbreaker"],
 ];
 
 function browsRarityColor(r) {
-  if (!r) return "#888";
-  const l = r.toLowerCase();
+  const l = (r || "").toLowerCase();
   if (l === "mythic")   return "#f97316";
   if (l === "rare")     return "#f59e0b";
   if (l === "uncommon") return "#94a3b8";
   return "#888";
+}
+
+const MANA_STYLES = {
+  W: { bg:"#f0ede0", text:"#5a4a28" },
+  U: { bg:"#1a6eb5", text:"#fff"    },
+  B: { bg:"#2d2d3a", text:"#ccc"    },
+  R: { bg:"#d44128", text:"#fff"    },
+  G: { bg:"#1a7a4a", text:"#fff"    },
+  C: { bg:"#9a8a7a", text:"#fff"    },
+  S: { bg:"#a8d8ea", text:"#333"    },
+};
+
+function ManaPip({ sym }) {
+  const s = sym.slice(1, -1);
+  const style = MANA_STYLES[s] || { bg:"#333", text:"#aaa" };
+  return (
+    <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center",
+      width:18, height:18, borderRadius:"50%", background:style.bg, color:style.text,
+      fontSize:9, fontWeight:700, flexShrink:0, fontFamily:"monospace", lineHeight:1 }}>
+      {s}
+    </span>
+  );
+}
+
+function ManaCost({ cost }) {
+  if (!cost) return null;
+  const parts = cost.split(" // ");
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+      {parts.map((part, pi) => (
+        <React.Fragment key={pi}>
+          {pi > 0 && <span style={{ color:"#555", fontSize:11, margin:"0 2px" }}>//</span>}
+          <div style={{ display:"flex", gap:2, alignItems:"center" }}>
+            {(part.match(/\{[^}]+\}/g) || []).map((sym, i) => <ManaPip key={i} sym={sym}/>)}
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function CardFaceBlock({ face, showDivider }) {
+  return (
+    <>
+      {showDivider && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 0" }}>
+          <div style={{ flex:1, height:1, background:BORDER }}/>
+          <span style={{ color:"#444", fontSize:11 }}>// Adventure</span>
+          <div style={{ flex:1, height:1, background:BORDER }}/>
+        </div>
+      )}
+      <div style={{ marginBottom: showDivider ? 0 : 0 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"#fff", letterSpacing:0.5 }}>
+            {face.name}
+          </div>
+          <ManaCost cost={face.mana_cost}/>
+        </div>
+        {face.type_line && (
+          <div style={{ color:"#888", fontSize:12, fontStyle:"italic", marginBottom:8,
+            paddingBottom:8, borderBottom:`1px solid ${BORDER}` }}>
+            {face.type_line}
+          </div>
+        )}
+        {face.oracle_text && (
+          <div style={{ color:"#ccc", fontSize:13, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+            {face.oracle_text}
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 function CardBrowseDetailView({ card, onBack, onAdd }) {
@@ -5150,10 +5326,17 @@ function CardBrowseDetailView({ card, onBack, onAdd }) {
   };
 
   const p = card.prices || {};
+  const hasPrice = p.usd || p.usd_foil || p.eur || p.tix;
+  const pu = card.purchase_uris || {};
+  const isUnreleased = card.released_at && card.released_at > new Date().toISOString().slice(0,10);
+  const faces = card.card_faces;
+
+  const openLink = (url) => { if (url) window.open(url, "_blank", "noopener"); };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflowY:"auto",
       WebkitOverflowScrolling:"touch" }}>
+
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px 12px",
         borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
@@ -5162,93 +5345,180 @@ function CardBrowseDetailView({ card, onBack, onAdd }) {
           <Icon.Back size={22} color="#888"/>
         </button>
         <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"#fff",
-          letterSpacing:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          letterSpacing:1, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
           {card.name}
         </div>
+        {isUnreleased && (
+          <div style={{ background:"#7c3aed", borderRadius:6, padding:"3px 8px",
+            fontSize:9, color:"#fff", fontWeight:700, flexShrink:0 }}>
+            UNRELEASED
+          </div>
+        )}
       </div>
 
       <div style={{ padding:"16px 16px 120px" }}>
+
         {/* Card image */}
         <div style={{ display:"flex", justifyContent:"center", marginBottom:16 }}>
-          <img
-            src={card.images?.large || card.images?.normal || card.images?.small}
+          <img src={card.images?.large || card.images?.normal || card.images?.small}
             alt={card.name}
             style={{ width:"min(100%, 260px)", borderRadius:12,
               boxShadow:"0 8px 32px rgba(0,0,0,0.6)" }}/>
         </div>
 
-        {/* Oracle text card */}
+        {/* Oracle text — handles multi-face cards */}
         <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
           padding:"14px 16px", marginBottom:12 }}>
-          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff",
-            letterSpacing:0.5, marginBottom:2 }}>{card.name}</div>
-          {card.mana_cost && (
-            <div style={{ color:"#888", fontSize:12, marginBottom:6 }}>{card.mana_cost}</div>
-          )}
-          {card.type_line && (
-            <div style={{ color:"#aaa", fontSize:13, fontStyle:"italic", marginBottom:8,
-              paddingBottom:8, borderBottom:`1px solid ${BORDER}` }}>
-              {card.type_line}
-            </div>
-          )}
-          {card.oracle_text && (
-            <div style={{ color:"#ccc", fontSize:13, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
-              {card.oracle_text}
-            </div>
+          {faces ? (
+            faces.map((face, i) => <CardFaceBlock key={i} face={face} showDivider={i > 0}/>)
+          ) : (
+            <>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:"#fff", letterSpacing:0.5 }}>
+                  {card.name}
+                </div>
+                <ManaCost cost={card.mana_cost}/>
+              </div>
+              {card.type_line && (
+                <div style={{ color:"#888", fontSize:12, fontStyle:"italic", marginBottom:8,
+                  paddingBottom:8, borderBottom:`1px solid ${BORDER}` }}>
+                  {card.type_line}
+                </div>
+              )}
+              {card.oracle_text && (
+                <div style={{ color:"#ccc", fontSize:13, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+                  {card.oracle_text}
+                </div>
+              )}
+            </>
           )}
         </div>
 
         {/* Print info */}
         <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
           padding:"12px 16px", marginBottom:12 }}>
-          <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>PRINT</div>
-          <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+          <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:10 }}>PRINT</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px 16px" }}>
             <div>
-              <div style={{ color:"#555", fontSize:10 }}>Set</div>
+              <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>Set</div>
               <div style={{ color:"#fff", fontSize:13 }}>{card.set?.name}</div>
             </div>
             <div>
-              <div style={{ color:"#555", fontSize:10 }}>Number</div>
+              <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>Number</div>
               <div style={{ color:"#fff", fontSize:13 }}>#{card.number}</div>
             </div>
             <div>
-              <div style={{ color:"#555", fontSize:10 }}>Rarity</div>
+              <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>Rarity</div>
               <div style={{ color:browsRarityColor(card.rarity), fontSize:13, textTransform:"capitalize" }}>
                 {card.rarity}
               </div>
             </div>
+            {card.artist && (
+              <div>
+                <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>Artist</div>
+                <div style={{ color:"#aaa", fontSize:13 }}>{card.artist}</div>
+              </div>
+            )}
           </div>
+          {card.finishes?.length > 0 && (
+            <div style={{ marginTop:10, display:"flex", gap:6 }}>
+              {card.finishes.map(f => (
+                <span key={f} style={{ padding:"2px 8px", borderRadius:4, fontSize:10, fontWeight:600,
+                  background: f==="foil" ? "#f59e0b22" : "#1a1a1a",
+                  border:`1px solid ${f==="foil" ? "#f59e0b" : "#333"}`,
+                  color: f==="foil" ? "#f59e0b" : "#666",
+                  textTransform:"capitalize" }}>{f}</span>
+              ))}
+            </div>
+          )}
+          {card.promo_types?.includes("universesbeyond") && (
+            <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ padding:"2px 8px", borderRadius:4, fontSize:10, fontWeight:600,
+                background:"#4f46e522", border:"1px solid #4f46e5", color:"#818cf8" }}>
+                Universes Beyond
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Prices */}
-        {(p.usd || p.usd_foil || p.eur || p.tix) && (
+        <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+          padding:"12px 16px", marginBottom:12 }}>
+          <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:10 }}>PRICES</div>
+          {hasPrice ? (
+            <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+              {p.usd && <div>
+                <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>USD</div>
+                <div style={{ color:TEAL, fontSize:20, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd}</div>
+              </div>}
+              {p.usd_foil && <div>
+                <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>USD Foil</div>
+                <div style={{ color:"#f59e0b", fontSize:20, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd_foil}</div>
+              </div>}
+              {p.usd_etched && <div>
+                <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>USD Etched</div>
+                <div style={{ color:"#c084fc", fontSize:20, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd_etched}</div>
+              </div>}
+              {p.eur && <div>
+                <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>EUR</div>
+                <div style={{ color:"#aaa", fontSize:20, fontFamily:"'Bebas Neue',sans-serif" }}>€{p.eur}</div>
+              </div>}
+              {p.tix && <div>
+                <div style={{ color:"#555", fontSize:10, marginBottom:2 }}>TIX</div>
+                <div style={{ color:"#aaa", fontSize:20, fontFamily:"'Bebas Neue',sans-serif" }}>{p.tix}</div>
+              </div>}
+            </div>
+          ) : (
+            <div style={{ color:"#444", fontSize:13 }}>
+              {isUnreleased ? "Prices unavailable until release" : "No price data"}
+            </div>
+          )}
+        </div>
+
+        {/* Buy links */}
+        {(pu.tcgplayer || pu.cardmarket || pu.cardhoarder) && (
           <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
             padding:"12px 16px", marginBottom:12 }}>
-            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>PRICES</div>
-            <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
-              {p.usd && (
-                <div>
-                  <div style={{ color:"#555", fontSize:10 }}>USD</div>
-                  <div style={{ color:TEAL, fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd}</div>
-                </div>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:10 }}>BUY THIS CARD</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {pu.tcgplayer && (
+                <button onClick={() => openLink(pu.tcgplayer)}
+                  style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:10,
+                    padding:"11px 14px", cursor:"pointer", fontFamily:"inherit" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#e85d26", flexShrink:0 }}/>
+                    <span style={{ color:"#fff", fontSize:13 }}>TCGPlayer</span>
+                    {p.usd && <span style={{ color:TEAL, fontSize:13, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd}</span>}
+                  </div>
+                  <span style={{ color:"#555", fontSize:12 }}>→</span>
+                </button>
               )}
-              {p.usd_foil && (
-                <div>
-                  <div style={{ color:"#555", fontSize:10 }}>USD Foil</div>
-                  <div style={{ color:"#f59e0b", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd_foil}</div>
-                </div>
+              {pu.cardmarket && (
+                <button onClick={() => openLink(pu.cardmarket)}
+                  style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:10,
+                    padding:"11px 14px", cursor:"pointer", fontFamily:"inherit" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#0070f3", flexShrink:0 }}/>
+                    <span style={{ color:"#fff", fontSize:13 }}>Cardmarket</span>
+                    {p.eur && <span style={{ color:"#aaa", fontSize:13, fontFamily:"'Bebas Neue',sans-serif" }}>€{p.eur}</span>}
+                  </div>
+                  <span style={{ color:"#555", fontSize:12 }}>→</span>
+                </button>
               )}
-              {p.eur && (
-                <div>
-                  <div style={{ color:"#555", fontSize:10 }}>EUR</div>
-                  <div style={{ color:"#aaa", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>€{p.eur}</div>
-                </div>
-              )}
-              {p.tix && (
-                <div>
-                  <div style={{ color:"#555", fontSize:10 }}>TIX</div>
-                  <div style={{ color:"#aaa", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>{p.tix}</div>
-                </div>
+              {pu.cardhoarder && (
+                <button onClick={() => openLink(pu.cardhoarder)}
+                  style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:10,
+                    padding:"11px 14px", cursor:"pointer", fontFamily:"inherit" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:"#8b5cf6", flexShrink:0 }}/>
+                    <span style={{ color:"#fff", fontSize:13 }}>Cardhoarder</span>
+                    {p.tix && <span style={{ color:"#aaa", fontSize:13, fontFamily:"'Bebas Neue',sans-serif" }}>{p.tix} TIX</span>}
+                  </div>
+                  <span style={{ color:"#555", fontSize:12 }}>→</span>
+                </button>
               )}
             </div>
           </div>
@@ -5258,23 +5528,42 @@ function CardBrowseDetailView({ card, onBack, onAdd }) {
         {card.legalities && Object.keys(card.legalities).length > 0 && (
           <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
             padding:"12px 16px", marginBottom:12 }}>
-            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>LEGALITY</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 12px" }}>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:10 }}>LEGALITY</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"7px 12px" }}>
               {BROWSE_LEGALITY_FORMATS.map(([label, key]) => {
                 const status = card.legalities[key] || "not_legal";
                 const isLegal = status === "legal";
+                const isBanned = status === "banned";
                 return (
                   <div key={key} style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <div style={{ width:44, padding:"2px 0", textAlign:"center", borderRadius:4, flexShrink:0,
-                      background: isLegal ? "#16a34a22" : "#1a1a1a",
-                      border:`1px solid ${isLegal ? "#16a34a" : "#2a2a2a"}`,
-                      color: isLegal ? "#4ade80" : "#3a3a3a", fontSize:9, fontWeight:700 }}>
-                      {isLegal ? "LEGAL" : "NOT"}
+                      background: isLegal ? "#16a34a22" : isBanned ? "#ef444422" : "#1a1a1a",
+                      border:`1px solid ${isLegal ? "#16a34a" : isBanned ? "#ef4444" : "#2a2a2a"}`,
+                      color: isLegal ? "#4ade80" : isBanned ? "#ef4444" : "#3a3a3a",
+                      fontSize:9, fontWeight:700 }}>
+                      {isLegal ? "LEGAL" : isBanned ? "BAN" : "NOT"}
                     </div>
                     <span style={{ color: isLegal ? "#ccc" : "#444", fontSize:12 }}>{label}</span>
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* External links */}
+        {card.scryfall_uri && (
+          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+            padding:"12px 16px", marginBottom:4 }}>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:10 }}>MORE INFO</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <button onClick={() => openLink(card.scryfall_uri)}
+                style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                  background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:10,
+                  padding:"11px 14px", cursor:"pointer", fontFamily:"inherit" }}>
+                <span style={{ color:"#aaa", fontSize:13 }}>View on Scryfall</span>
+                <span style={{ color:"#555", fontSize:12 }}>→</span>
+              </button>
             </div>
           </div>
         )}
@@ -5291,7 +5580,7 @@ function CardBrowseDetailView({ card, onBack, onAdd }) {
         </button>
       </div>
 
-      {/* Add card modal — reuses SearchView's pattern */}
+      {/* Add card modal */}
       {addingCard && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:300,
           display:"flex", alignItems:"flex-end", justifyContent:"center" }}
@@ -9143,8 +9432,8 @@ function App() {
     setImporting(false); setTab("collection");
   };
   const handleSearchCardPress = (card) => {
-    const existing = collection.find(i=>i.card.id===card.id);
-    setDetail(existing || { id:"__preview__", card, condition:"near_mint", preview:true });
+    setBrowseCard(card);
+    setBrowseSet(null);
   };
 
   if (!loaded) return (
@@ -9369,6 +9658,21 @@ function App() {
                   setDetail(updatedItem);
                 }}
               />
+            ) : tab==="search" ? (
+              /* Keep SearchView mounted beneath overlays so scroll/query state is preserved */
+              <div style={{ position:"relative", height:"100%", overflow:"hidden" }}>
+                <SearchView collection={collection} onCardPress={handleSearchCardPress} onAdd={addCard} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }}/>
+                {browseSet && !browseCard && (
+                  <div style={{ position:"absolute", inset:0, background:"#0a0a0a", zIndex:10, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+                    <SetBrowseView setInfo={browseSet} onBack={() => setBrowseSet(null)} onCardPress={card => setBrowseCard(card)}/>
+                  </div>
+                )}
+                {browseCard && (
+                  <div style={{ position:"absolute", inset:0, background:"#0a0a0a", zIndex:20, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+                    <CardBrowseDetailView card={browseCard} onBack={() => setBrowseCard(null)} onAdd={addCard}/>
+                  </div>
+                )}
+              </div>
             ) : browseCard ? (
               <CardBrowseDetailView
                 card={browseCard}
@@ -9404,8 +9708,6 @@ function App() {
                   <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
                 </div>
               </div>
-            ) : tab==="search" ? (
-              <SearchView collection={collection} onCardPress={handleSearchCardPress} onAdd={addCard}/>
             ) : tab==="decks" ? (
               <DecksView collection={collection}/>
             ) : tab==="collection" ? (
