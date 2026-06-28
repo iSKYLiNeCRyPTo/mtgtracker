@@ -2,7 +2,7 @@
  * DecksView.jsx — Deck builder + life counter + portfolio for MTGTracker
  */
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { computeAutoTags, getTagMeta } from "./cardTags.jsx";
 
@@ -1735,7 +1735,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
 }
 
 // ── Main DecksView export ─────────────────────────────────────────────────────
-export default function DecksView({ collection, pendingImportText, onClearPendingImport }) {
+export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck }) {
   const [decks, setDecks]             = useState(loadDecks);
   const [editingDeck, setEditingDeck] = useState(null);
   const [playingDeck, setPlayingDeck] = useState(null);
@@ -1747,6 +1747,14 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
   useEffect(() => {
     if (pendingImportText) setShowImport(true);
   }, [pendingImportText]);
+
+  useEffect(() => {
+    if (!pendingDeck) return;
+    const next = [...decks, pendingDeck];
+    setDecks(next); saveDecks(next);
+    setEditingDeck(pendingDeck);
+    onClearPendingDeck?.();
+  }, [pendingDeck]);
 
   const persistDecks = (next) => { setDecks(next); saveDecks(next); };
 
