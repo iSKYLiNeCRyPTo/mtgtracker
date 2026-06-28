@@ -5981,7 +5981,7 @@ function CardBrowseDetailView({ card, onBack, onAdd }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflowY:"auto",
-      WebkitOverflowScrolling:"touch" }}>
+      WebkitOverflowScrolling:"touch", paddingBottom:"calc(100px + env(safe-area-inset-bottom, 0px))" }}>
 
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px 12px",
@@ -6216,7 +6216,8 @@ function CardBrowseDetailView({ card, onBack, onAdd }) {
       </div>
 
       {/* Sticky add button */}
-      <div style={{ position:"fixed", bottom:0, left:0, right:0, padding:"12px 16px 36px",
+      <div style={{ position:"fixed", bottom:0, left:0, right:0,
+        padding:"12px 16px", paddingBottom:"calc(72px + env(safe-area-inset-bottom, 0px))",
         background:"linear-gradient(transparent, #0a0a0a 40%)", pointerEvents:"none" }}>
         <button onClick={() => setAddingCard(card)}
           style={{ width:"100%", padding:15, background:TEAL, border:"none", borderRadius:14,
