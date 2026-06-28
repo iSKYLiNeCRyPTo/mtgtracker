@@ -4823,7 +4823,7 @@ const SET_TYPE_COLOR = {
   alchemy:"#60a5fa",
 };
 
-function SearchView({ onCardPress, onAdd, onBrowseSet }) {
+function SearchView({ onCardPress, onAdd, onBrowseSet, onBack }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -4965,8 +4965,16 @@ function SearchView({ onCardPress, onAdd, onBrowseSet }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
       <div style={{ padding:"14px 20px 12px", borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
-        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#fff",
-          letterSpacing:1, marginBottom:12 }}>SEARCH CARDS</div>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+          <button onClick={() => q.trim() ? setQ("") : onBack && onBack()}
+            style={{ background:"none", border:"none", cursor:"pointer", padding:4,
+              display:"flex", alignItems:"center", flexShrink:0 }}>
+            <Icon.Back size={22} color="#888"/>
+          </button>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#fff", letterSpacing:1 }}>
+            SEARCH CARDS
+          </div>
+        </div>
         <div style={{ position:"relative" }}>
           <div style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)" }}>
             <Icon.Search size={16} color="#555"/>
@@ -9661,7 +9669,7 @@ function App() {
             ) : tab==="search" ? (
               /* Keep SearchView mounted beneath overlays so scroll/query state is preserved */
               <div style={{ position:"relative", height:"100%", overflow:"hidden" }}>
-                <SearchView collection={collection} onCardPress={handleSearchCardPress} onAdd={addCard} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }}/>
+                <SearchView collection={collection} onCardPress={handleSearchCardPress} onAdd={addCard} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onBack={() => setTab("home")}/>
                 {browseSet && !browseCard && (
                   <div style={{ position:"absolute", inset:0, background:"#0a0a0a", zIndex:10, display:"flex", flexDirection:"column", overflow:"hidden" }}>
                     <SetBrowseView setInfo={browseSet} onBack={() => setBrowseSet(null)} onCardPress={card => setBrowseCard(card)}/>
