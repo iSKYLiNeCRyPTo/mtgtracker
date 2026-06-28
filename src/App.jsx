@@ -6679,7 +6679,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
         case "name_asc":   return a.card.name.localeCompare(b.card.name);
         default:           return (b.addedAt||0) - (a.addedAt||0);
       }
-    }), [collection, search, minValue, sort, valueById]);
+    }), [collection, search, minValue, sort, valueById, activeTagFilters]);
 
   const totalVal = useMemo(() =>
     collection.filter(i=>!i.sold).reduce((s, i) => s + getVal(i), 0),
