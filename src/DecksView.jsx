@@ -1810,7 +1810,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
 }
 
 // ── Main DecksView export ─────────────────────────────────────────────────────
-export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck, onCardPress, mainTab: mainTabProp, onMainTabChange }) {
+export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck, onCardPress, mainTab: mainTabProp, onMainTabChange, onGoToPortfolio }) {
   const [decks, setDecks]             = useState(loadDecks);
   const [editingDeck, setEditingDeck] = useState(null);
   const [playingDeck, setPlayingDeck] = useState(null);
@@ -1932,16 +1932,20 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
 
         {/* MY DECKS / PORTFOLIO sub-tabs */}
         <div style={{ display:"flex", marginTop:12, borderBottom:`1px solid ${BORDER}`, marginLeft:-0, marginRight:-0 }}>
-          {[["decks","MY DECKS"],["portfolio","PORTFOLIO"]].map(([id, label]) => (
-            <button key={id} onClick={() => setMainTab(id)} style={{
-              flex:1, padding:"9px 0", background:"none", border:"none",
-              borderBottom: mainTab===id ? `2px solid ${TEAL}` : "2px solid transparent",
-              color: mainTab===id ? TEAL : "#555",
-              fontSize:11, fontWeight: mainTab===id ? 700 : 400,
-              cursor:"pointer", fontFamily:"inherit", letterSpacing:0.8,
-              marginBottom:-1,
-            }}>{label}</button>
-          ))}
+          <button onClick={() => setMainTab("decks")} style={{
+            flex:1, padding:"9px 0", background:"none", border:"none",
+            borderBottom: mainTab==="decks" ? `2px solid ${TEAL}` : "2px solid transparent",
+            color: mainTab==="decks" ? TEAL : "#555",
+            fontSize:11, fontWeight: mainTab==="decks" ? 700 : 400,
+            cursor:"pointer", fontFamily:"inherit", letterSpacing:0.8, marginBottom:-1,
+          }}>MY DECKS</button>
+          <button onClick={() => onGoToPortfolio?.()} style={{
+            flex:1, padding:"9px 0", background:"none", border:"none",
+            borderBottom: "2px solid transparent",
+            color: "#555",
+            fontSize:11, fontWeight:400,
+            cursor:"pointer", fontFamily:"inherit", letterSpacing:0.8, marginBottom:-1,
+          }}>PORTFOLIO</button>
         </div>
 
         {mainTab === "decks" && totalGames > 0 && (
@@ -1956,12 +1960,8 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
         )}
       </div>
 
-      {/* Portfolio tab */}
-      {mainTab === "portfolio" ? (
-        <PortfolioTab collection={collection} decks={decks} onAddToDeck={addCardToDeck} onCardPress={onCardPress}/>
-      ) : (
-        /* Deck list */
-        <div style={{ flex:1, overflowY:"auto", padding:"14px 16px", display:"flex",
+      {/* Deck list */}
+      <div style={{ flex:1, overflowY:"auto", padding:"14px 16px", display:"flex",
           flexDirection:"column", gap:12 }}>
           {decks.length === 0 ? (
             <div style={{ textAlign:"center", padding:"60px 20px" }}>
@@ -2005,7 +2005,6 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
             </button>
           )}
         </div>
-      )}
 
       {showNew && <NewDeckModal onSave={createDeck} onClose={() => setShowNew(false)}/>}
 
