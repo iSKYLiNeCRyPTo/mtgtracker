@@ -8955,9 +8955,8 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
 
     const boot = async () => {
       try {
-        // Check version
         const meta = await getEmbeddingIndexMeta();
-        if (!meta?.version) {
+        if (!meta) {
           setIndexStatus("Card database unavailable — use search");
           return;
         }
@@ -8967,7 +8966,7 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
 
         let buffer, metaData;
         if (needsUpdate) {
-          setIndexStatus(`Downloading ${meta.count?.toLocaleString()} card database...`);
+          setIndexStatus(meta.count > 0 ? `Downloading ${meta.count.toLocaleString()} card database...` : "Downloading card database...");
           [buffer, metaData] = await Promise.all([
             downloadEmbeddingIndex(meta.storagePath),
             downloadCardsMeta(meta.metaPath),

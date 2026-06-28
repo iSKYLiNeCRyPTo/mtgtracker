@@ -246,24 +246,35 @@ export function listenToUserData(uid, onUpdate) {
 // Built by pipeline/build_node.mjs, stored in Firebase Storage.
 // All users share the same index — downloaded once, cached in IndexedDB.
 
+const DEFAULT_INDEX_META = {
+  version:     "default",
+  count:       0,
+  storagePath: "embeddings/global-v1.bin",
+  metaPath:    "embeddings/cards-meta.json",
+  checksum:    null,
+};
+
 export async function getEmbeddingIndexMeta() {
   init();
   const apiKey    = firebaseConfig.apiKey;
   const projectId = firebaseConfig.projectId;
+  if (!apiKey || apiKey.startsWith("REPLACE")) return DEFAULT_INDEX_META;
   const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/meta/embeddingIndex?key=${apiKey}`;
   try {
     const resp = await fetch(url);
-    if (!resp.ok) return null;
+    // If doc doesn't exist yet, fall back to default paths
+    if (resp.status === 404) return DEFAULT_INDEX_META;
+    if (!resp.ok) return DEFAULT_INDEX_META;
     const data = await resp.json();
     const f = data.fields || {};
     return {
-      version:     f.version?.stringValue || null,
+      version:     f.version?.stringValue || "default",
       count:       parseInt(f.count?.integerValue || 0),
       storagePath: f.storagePath?.stringValue || "embeddings/global-v1.bin",
       metaPath:    f.metaPath?.stringValue || "embeddings/cards-meta.json",
       checksum:    f.checksum?.stringValue || null,
     };
-  } catch { return null; }
+  } catch { return DEFAULT_INDEX_META; }
 }
 
 export async function downloadEmbeddingIndex(storagePath) {
