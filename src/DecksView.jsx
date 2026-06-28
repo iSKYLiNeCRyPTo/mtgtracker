@@ -1075,6 +1075,7 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
   const [results, setResults]           = useState([]);
   const [searching, setSearching]       = useState(false);
   const [selectedCard, setSelectedCard] = useState(null); // cardId
+  const [catPickerFor, setCatPickerFor] = useState(null); // cardId when cat picker open
   const [subTab, setSubTab]             = useState("cards");
   const [groupBy, setGroupBy]           = useState("category"); // "type" | "category"
   const [isDesktop, setIsDesktop]       = useState(window.innerWidth >= 768);
@@ -1141,6 +1142,17 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
       c.card.id === cardId ? { ...c, qty: Math.min(qty, max) } : c
     )});
   };
+
+  const setCat = (cardId, cat) => {
+    onUpdate({ ...deck, cards: deck.cards.map(c => c.card.id === cardId ? { ...c, primaryCat: cat } : c) });
+    setCatPickerFor(null);
+  };
+
+  const deckCats = useMemo(() => {
+    const existing = [...new Set(deck.cards.map(c => c.primaryCat).filter(Boolean))].sort();
+    const defaults = ["Commander","Land","Ramp","Draw","Removal","Lifegain","Tokens","Protection","Recursion","Pump","Evasion","Counters","Creature","Other"];
+    return [...new Set([...existing, ...defaults])];
+  }, [deck.cards]);
 
   // Type grouping
   const grouped = {};
@@ -1234,7 +1246,7 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
           <div style={{ position:"relative", height:SC_H + 12, width:Math.max(stackW, SC_W), flexShrink:0 }}>
             {cards.map((c, idx) => {
               const isSel  = selectedCard === c.card.id;
-              const imgSrc = c.card.images?.small || c.card.image_uris?.small;
+              const imgSrc = c.card.images?.small || c.card.image_uris?.small || c.card.card_faces?.[0]?.image_uris?.small;
               return (
                 <button key={c.card.id}
                   onClick={() => setSelectedCard(isSel ? null : c.card.id)}
@@ -1284,58 +1296,80 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
         {/* Selected card detail tray */}
         {activeC && (
           <div style={{ margin:"6px 16px 0", background:"#0f0f0f", border:`1px solid ${BORDER}`,
-            borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ color:"#fff", fontSize:13, fontWeight:600,
-                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {activeC.card.name}
-              </div>
-              <div style={{ color:"#555", fontSize:10, marginTop:1,
-                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {activeC.card.type_line}
-                {activeC.card.power != null && ` · ${activeC.card.power}/${activeC.card.toughness}`}
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5, flexWrap:"wrap" }}>
-                {(() => {
-                  const price = parseFloat((activeC.foil ? activeC.card?.prices?.usd_foil : activeC.card?.prices?.usd) || activeC.card?.prices?.usd || 0);
-                  return price > 0 && (
-                    <span style={{ color:TEAL, fontSize:12, fontWeight:700 }}>
-                      {fmt(price * (activeC.qty || 1))}
-                    </span>
-                  );
-                })()}
-                <button onClick={() => toggleOwned(activeC.card.id)} style={{
-                  background:"none", border:`1px solid ${activeC.owned ? TEAL : "#333"}`,
-                  borderRadius:6, color: activeC.owned ? TEAL : "#555", fontSize:9,
-                  padding:"2px 8px", cursor:"pointer", fontFamily:"inherit", fontWeight: activeC.owned ? 700 : 400,
-                }}>{activeC.owned ? "OWNED" : "NEED"}</button>
-                <button onClick={() => toggleFoil(activeC.card.id)} style={{
-                  background:"none", border:`1px solid ${activeC.foil ? "#f59e0b" : "#333"}`,
-                  borderRadius:6, color: activeC.foil ? "#f59e0b" : "#555", fontSize:9,
-                  padding:"2px 8px", cursor:"pointer", fontFamily:"inherit",
-                }}>FOIL</button>
-              </div>
-            </div>
-            {!fmt_obj.singleton && (
-              <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
-                <button onClick={() => setQty(activeC.card.id, (activeC.qty||1)-1)} style={{
-                  width:30, height:30, borderRadius:"8px 0 0 8px", background:"#1a1a1a",
-                  border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:18, lineHeight:1,
-                }}>−</button>
-                <div style={{ width:30, height:30, background:"#111", border:`1px solid ${BORDER}`,
-                  borderLeft:"none", borderRight:"none", display:"flex", alignItems:"center",
-                  justifyContent:"center", color:"#fff", fontSize:13, fontWeight:700 }}>
-                  {activeC.qty||1}
+            borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ color:"#fff", fontSize:13, fontWeight:600,
+                  overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {activeC.card.name}
                 </div>
-                <button onClick={() => setQty(activeC.card.id, (activeC.qty||1)+1)} style={{
-                  width:30, height:30, borderRadius:"0 8px 8px 0", background:"#1a1a1a",
-                  border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:18, lineHeight:1,
-                }}>+</button>
+                <div style={{ color:"#555", fontSize:10, marginTop:1,
+                  overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {activeC.card.type_line}
+                  {activeC.card.power != null && ` · ${activeC.card.power}/${activeC.card.toughness}`}
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5, flexWrap:"wrap" }}>
+                  {(() => {
+                    const price = parseFloat((activeC.foil ? activeC.card?.prices?.usd_foil : activeC.card?.prices?.usd) || activeC.card?.prices?.usd || 0);
+                    return price > 0 && (
+                      <span style={{ color:TEAL, fontSize:12, fontWeight:700 }}>
+                        {fmt(price * (activeC.qty || 1))}
+                      </span>
+                    );
+                  })()}
+                  <button onClick={() => toggleOwned(activeC.card.id)} style={{
+                    background:"none", border:`1px solid ${activeC.owned ? TEAL : "#333"}`,
+                    borderRadius:6, color: activeC.owned ? TEAL : "#555", fontSize:9,
+                    padding:"2px 8px", cursor:"pointer", fontFamily:"inherit", fontWeight: activeC.owned ? 700 : 400,
+                  }}>{activeC.owned ? "OWNED" : "NEED"}</button>
+                  <button onClick={() => toggleFoil(activeC.card.id)} style={{
+                    background:"none", border:`1px solid ${activeC.foil ? "#f59e0b" : "#333"}`,
+                    borderRadius:6, color: activeC.foil ? "#f59e0b" : "#555", fontSize:9,
+                    padding:"2px 8px", cursor:"pointer", fontFamily:"inherit",
+                  }}>FOIL</button>
+                  {hasCats && (
+                    <button onClick={() => setCatPickerFor(catPickerFor === activeC.card.id ? null : activeC.card.id)} style={{
+                      background:"none", border:`1px solid ${catPickerFor === activeC.card.id ? TEAL : "#333"}`,
+                      borderRadius:6, color: catPickerFor === activeC.card.id ? TEAL : "#888", fontSize:9,
+                      padding:"2px 8px", cursor:"pointer", fontFamily:"inherit",
+                      maxWidth:90, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                    }}>{(activeC.primaryCat || "OTHER").toUpperCase()}</button>
+                  )}
+                </div>
+              </div>
+              {!fmt_obj.singleton && (
+                <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+                  <button onClick={() => setQty(activeC.card.id, (activeC.qty||1)-1)} style={{
+                    width:30, height:30, borderRadius:"8px 0 0 8px", background:"#1a1a1a",
+                    border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:18, lineHeight:1,
+                  }}>−</button>
+                  <div style={{ width:30, height:30, background:"#111", border:`1px solid ${BORDER}`,
+                    borderLeft:"none", borderRight:"none", display:"flex", alignItems:"center",
+                    justifyContent:"center", color:"#fff", fontSize:13, fontWeight:700 }}>
+                    {activeC.qty||1}
+                  </div>
+                  <button onClick={() => setQty(activeC.card.id, (activeC.qty||1)+1)} style={{
+                    width:30, height:30, borderRadius:"0 8px 8px 0", background:"#1a1a1a",
+                    border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:18, lineHeight:1,
+                  }}>+</button>
+                </div>
+              )}
+              <button onClick={() => { removeCard(activeC.card.id); setSelectedCard(null); }} style={{
+                background:"none", border:"none", cursor:"pointer", color:"#ef4444", padding:4, fontSize:18,
+              }}>✕</button>
+            </div>
+            {catPickerFor === activeC.card.id && (
+              <div style={{ marginTop:8, display:"flex", flexWrap:"wrap", gap:5, paddingTop:8, borderTop:`1px solid ${BORDER}` }}>
+                {deckCats.map(cat => (
+                  <button key={cat} onClick={() => setCat(activeC.card.id, cat)} style={{
+                    background: activeC.primaryCat === cat ? TEAL+"22" : "#1a1a1a",
+                    border: `1px solid ${activeC.primaryCat === cat ? TEAL : "#2a2a2a"}`,
+                    borderRadius:6, color: activeC.primaryCat === cat ? TEAL : "#666",
+                    fontSize:9, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit", textTransform:"uppercase",
+                  }}>{cat}</button>
+                ))}
               </div>
             )}
-            <button onClick={() => { removeCard(activeC.card.id); setSelectedCard(null); }} style={{
-              background:"none", border:"none", cursor:"pointer", color:"#ef4444", padding:4, fontSize:18,
-            }}>✕</button>
           </div>
         )}
       </div>
@@ -1437,8 +1471,8 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
                       style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
                         width:"100%", background: inDeck ? TEAL+"11" : "none",
                         border:"none", borderBottom:`1px solid ${BORDER}`, cursor:"pointer", textAlign:"left" }}>
-                      {card.image_uris?.small && (
-                        <img src={card.image_uris.small} style={{ height:40, borderRadius:3, flexShrink:0 }}/>
+                      {(card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small) && (
+                        <img src={card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small} style={{ height:40, borderRadius:3, flexShrink:0 }}/>
                       )}
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ color: inDeck ? TEAL : "#fff", fontSize:13, fontWeight: inDeck?700:400 }}>
