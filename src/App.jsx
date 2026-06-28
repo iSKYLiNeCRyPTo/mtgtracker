@@ -8971,9 +8971,10 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
             downloadEmbeddingIndex(meta.storagePath),
             downloadCardsMeta(meta.metaPath),
           ]);
-          await idbSet("index-buffer", buffer);
-          await idbSet("index-cards",  metaData);
-          await idbSet("index-meta",   { version: meta.version });
+          // Best-effort cache — don't let storage quota errors kill the scanner
+          idbSet("index-buffer", buffer).catch(() => {});
+          idbSet("index-cards",  metaData).catch(() => {});
+          idbSet("index-meta",   { version: meta.version }).catch(() => {});
         } else {
           setIndexStatus("Restoring card database...");
           [buffer, metaData] = await Promise.all([
@@ -9053,7 +9054,7 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
       } catch (err) {
         if (!cancelled) {
           console.error("[GlobalScan]", err);
-          setIndexStatus("Error — use search");
+          setIndexStatus(`Error: ${err?.message || err} — use search`);
         }
       }
     };
