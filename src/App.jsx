@@ -10373,7 +10373,7 @@ function App() {
                 </div>
               </div>
             ) : tab==="decks" ? (
-              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)} onCardPress={item=>setDetail(item)} mainTab={deckMainTab} onMainTabChange={setDeckMainTab}/>
+              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)} onCardPress={item=>setDetail(item)} mainTab={deckMainTab} onMainTabChange={setDeckMainTab} onGoToPortfolio={()=>setTab("collection")}/>
             ) : tab==="collection" ? (
               <CollectionView collection={collection} onCardPress={item=>setDetail(item)} onImport={()=>setImporting(true)} onRefreshPrices={refreshAllPrices} refreshing={refreshing}
                 collSubTab={collSubTab} setCollSubTab={setCollSubTab}
