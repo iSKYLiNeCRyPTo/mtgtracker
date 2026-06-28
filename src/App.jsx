@@ -4278,7 +4278,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
 
   // Fetch recent sets from Scryfall, then fetch one card art per set
   useEffect(() => {
-    const cached = sessionStorage.getItem("home_sets_mtg_v5");
+    const cached = sessionStorage.getItem("home_sets_mtg_v6");
     if (cached) { try { setNewSets(JSON.parse(cached)); return; } catch(_e) {} }
     scryfallFetch("/sets?order=released&direction=desc").then(async data => {
       const HOME_TYPES = [...MTG_MAIN_SET_TYPES, "commander", "commander_deck"];
@@ -4296,16 +4296,16 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
         .slice(0, 6)
         .map(s => ({ id:s.code, name:s.name, symbol:s.icon_svg_uri,
           releaseDate:s.released_at, total:s.card_count, series:s.set_type }));
-      // Fetch one card art per set in parallel (take first result, high EDHRec rank)
+      // Fetch one card art per set — use default ordering (edhrec fails for new/crossover sets)
       const sets = await Promise.all(raw.map(async s => {
         try {
-          const res = await scryfallFetch(`/cards/search?q=set:${s.id}+order:edhrec&unique=art&page=1`);
+          const res = await scryfallFetch(`/cards/search?q=set:${s.id}&unique=art&page=1`);
           const card = res?.data?.[0];
           return { ...s, image: card?.image_uris?.art_crop || card?.card_faces?.[0]?.image_uris?.art_crop || null };
         } catch { return s; }
       }));
       setNewSets(sets);
-      sessionStorage.setItem("home_sets_mtg_v5", JSON.stringify(sets));
+      sessionStorage.setItem("home_sets_mtg_v6", JSON.stringify(sets));
     }).catch(() => {});
   }, []);
 
@@ -4504,13 +4504,9 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
                   borderRadius:12, overflow:"hidden", cursor:"pointer", position:"relative" }}>
                 {/* Card art banner */}
                 <div style={{ width:"100%", height:72, background:"#1a1a1a", overflow:"hidden", position:"relative" }}>
-                  {set.image
-                    ? <img src={set.image} alt={set.name} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
-                    : set.symbol
-                      ? <img src={set.symbol} alt={set.name} style={{ width:36, height:36, objectFit:"contain",
-                          position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)",
-                          filter:"brightness(0) invert(0.3)" }}/>
-                      : null}
+                  {set.image && (
+                    <img src={set.image} alt={set.name} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                  )}
                 </div>
                 {/* Name + date */}
                 <div style={{ padding:"6px 8px 8px" }}>
@@ -9789,11 +9785,10 @@ function App() {
 
           {/* Bottom nav — flex child pinned to the bottom of the column */}
           {!isDesktop && (
-            <div className="pb-safe" style={{
+            <div style={{
               flexShrink:0,
               background:'#0d0d0d',
               borderTop:'1px solid #1e1e1e',
-              paddingBottom: "env(safe-area-inset-bottom, 0px)",
             }}>
               <div style={{ display:'flex', height:60 }}>
               {tabs.map(t => {
@@ -9826,6 +9821,8 @@ function App() {
                 );
               })}
               </div>
+              {/* Safe-area spacer — fills the iOS home indicator zone */}
+              <div className="h-safe" style={{ background:'#0d0d0d' }}/>
             </div>
           )}
         </div>
