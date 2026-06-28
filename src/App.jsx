@@ -325,6 +325,123 @@ async function fetchScryfallPrice(card) {
 
 // ── Pack Opening Views ────────────────────────────────────────────────────────
 
+// Commander deck — fetch all cards from set and confirm-add in one tap
+function CommanderDeckImportSession({ box, onDone, onCancel }) {
+  const [status, setStatus] = useState("loading"); // loading | ready | error
+  const [allCards, setAllCards] = useState([]);
+
+  React.useEffect(() => {
+    fetchSetCards(box.setId || "").then(cards => {
+      const playable = cards.filter(c => !/(Token|Emblem|Checklist)/i.test(c.type_line || ""));
+      setAllCards(playable.length ? playable : cards);
+      setStatus("ready");
+    }).catch(() => setStatus("error"));
+  }, [box.setId]);
+
+  const total = allCards.length;
+  const estCost = allCards.reduce((s, c) => s + parseFloat(c.prices?.usd || c.prices?.usd_foil || 0), 0);
+
+  const handleAddAll = () => {
+    const items = allCards.map((card, i) => ({
+      card, condition: "near_mint", foil: false,
+      id: `${card.id}-${Date.now()}-${i}`,
+    }));
+    onDone(items);
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#0a0a0a", zIndex:10000, display:"flex", flexDirection:"column" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+        padding:"14px 20px", paddingTop:"calc(14px + env(safe-area-inset-top,0px))",
+        borderBottom:"1px solid #1e1e1e", flexShrink:0 }}>
+        <button onClick={onCancel} style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
+          <Icon.Close size={20} color="#fff"/>
+        </button>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"#fff", letterSpacing:1 }}>
+            COMMANDER DECK
+          </div>
+          <div style={{ color:"#555", fontSize:11 }}>{box.setName}</div>
+        </div>
+        <div style={{ width:28 }}/>
+      </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"24px 20px" }}>
+        {status === "loading" && (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, paddingTop:40 }}>
+            <div style={{ width:32, height:32, border:"3px solid #00D4AA", borderTopColor:"transparent",
+              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+            <div style={{ color:"#555", fontSize:13 }}>Fetching deck list from Scryfall…</div>
+          </div>
+        )}
+        {status === "error" && (
+          <div style={{ textAlign:"center", color:"#ef4444", padding:40, fontSize:14 }}>
+            Could not load deck list. Check connection and try again.
+          </div>
+        )}
+        {status === "ready" && (
+          <>
+            <div style={{ background:"#111", border:"1px solid #1e1e1e", borderRadius:16,
+              padding:"20px 24px", marginBottom:24, display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+              <div>
+                <div style={{ color:"#555", fontSize:10, letterSpacing:0.5 }}>CARDS</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, color:"#fff" }}>{total}</div>
+              </div>
+              <div>
+                <div style={{ color:"#555", fontSize:10, letterSpacing:0.5 }}>EST. VALUE</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, color:"#00D4AA" }}>
+                  ${estCost.toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:10 }}>
+              ALL {total} CARDS
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:100 }}>
+              {allCards.map(card => {
+                const price = parseFloat(card.prices?.usd || card.prices?.usd_foil || 0);
+                return (
+                  <div key={card.id} style={{ display:"flex", alignItems:"center", gap:10,
+                    background:"#111", borderRadius:10, padding:"8px 12px" }}>
+                    {card.images?.small && (
+                      <img src={card.images.small} alt={card.name}
+                        style={{ height:36, width:26, objectFit:"contain", borderRadius:3, flexShrink:0 }}/>
+                    )}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ color:"#fff", fontSize:13, fontWeight:600,
+                        whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{card.name}</div>
+                      <div style={{ color:"#555", fontSize:10 }}>#{card.number} · {card.rarity}</div>
+                    </div>
+                    {price > 0 && (
+                      <div style={{ color:"#00D4AA", fontSize:12, fontWeight:700, flexShrink:0 }}>
+                        ${price.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {status === "ready" && (
+        <div style={{ padding:"12px 20px", paddingBottom:"calc(20px + env(safe-area-inset-bottom,0px))",
+          background:"linear-gradient(transparent, #0a0a0a 20%)", borderTop:"1px solid #1e1e1e" }}>
+          <button onClick={handleAddAll} style={{
+            width:"100%", padding:16, background:"#00D4AA", border:"none",
+            borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18, letterSpacing:1,
+            color:"#000", cursor:"pointer",
+          }}>
+            ADD ALL {total} CARDS TO COLLECTION
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Single pack opening — camera scan loop
 function PackOpeningSession({ box, packNumber, onDone, onCancel }) {
   const [cards, setCards]       = useState([]);
@@ -1130,7 +1247,7 @@ function BoxDetailView({ box, onBack, onOpenPack, onDelete, onUpdateBox, onSyncP
             color:"#000", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10,
           }}>
             <Icon.Pack size={20} color="#000"/>
-            OPEN PACK{box.totalPacks > 1 ? ` ${openedPacks.length + 1}` : ""}
+            {box.productType === "commander_deck" ? "ADD ALL CARDS" : `OPEN PACK${box.totalPacks > 1 ? ` ${openedPacks.length + 1}` : ""}`}
           </button>
           {(box.productType === "single_pack" || box.totalPacks === 1) && (
             <SellPackButton box={box} onUpdateBox={onUpdateBox} costPerPack={costPerPack}/>
@@ -2278,7 +2395,7 @@ function GroupedBoxCard({ boxes, onBoxPress, onSealedPrice, onDelete, onUpdateBo
                 style={{ flex:1, padding:"11px 0", background:TEAL, border:"none", borderRadius:10,
                   fontFamily:"'Bebas Neue',sans-serif", fontSize:13, letterSpacing:1,
                   color:"#000", cursor:"pointer" }}>
-                {isSinglePack ? "OPEN PACK" : "OPEN PACK 1"}
+                {boxes[0]?.productType === "commander_deck" ? "ADD ALL CARDS" : isSinglePack ? "OPEN PACK" : "OPEN PACK 1"}
               </button>
               <button onClick={e=>{ e.stopPropagation(); setDeleteConfirm(boxes[0].id); }}
                 style={{ padding:"11px 12px", background:"#1a0808", border:"1px solid #3d1a1a",
@@ -3263,11 +3380,16 @@ async function loadSetCards(setId, setName) {
     }
   }
 
-  // Fetch from Scryfall
-  const cards = await fetchSetCards(setId || "");
-  if (cards.length > 0) {
-    SET_CARD_CACHE[cacheKey] = cards;
-    return cards;
+  // Fetch from Scryfall — wrap to match the {id, name, number, nameLower, _full} shape
+  const scryfallCards = await fetchSetCards(setId || "");
+  if (scryfallCards.length > 0) {
+    const wrapped = scryfallCards.map(c => ({
+      id: c.id, name: c.name, number: c.number,
+      nameLower: (c.name || "").toLowerCase().replace(/[^a-z0-9 ]/g, ""),
+      _full: c,
+    }));
+    SET_CARD_CACHE[cacheKey] = wrapped;
+    return wrapped;
   }
 
   console.warn(`[loadSetCards] 0 cards found for setId="${setId}" setName="${setName}"`);
@@ -10036,12 +10158,18 @@ function App() {
         onDone={()=>{}} onClose={()=>setPriceChecking(false)}/>}
 
       {openingPackForBox && (
-          <PackOpeningSession
-            box={openingPackForBox}
-            packNumber={openingPackForBox.packs.filter(p=>p.opened).length + 1}
-            onDone={(cards)=>handlePackDone(openingPackForBox, cards)}
-            onCancel={()=>setOpeningPackForBox(null)}
-          />
+          openingPackForBox.productType === "commander_deck"
+            ? <CommanderDeckImportSession
+                box={openingPackForBox}
+                onDone={(cards)=>handlePackDone(openingPackForBox, cards)}
+                onCancel={()=>setOpeningPackForBox(null)}
+              />
+            : <PackOpeningSession
+                box={openingPackForBox}
+                packNumber={openingPackForBox.packs.filter(p=>p.opened).length + 1}
+                onDone={(cards)=>handlePackDone(openingPackForBox, cards)}
+                onCancel={()=>setOpeningPackForBox(null)}
+              />
         )}
 
       {/* New box form */}
