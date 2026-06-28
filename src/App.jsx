@@ -4278,13 +4278,15 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
 
   // Fetch recent sets from Scryfall, then fetch one card art per set
   useEffect(() => {
-    const cached = sessionStorage.getItem("home_sets_mtg_v3");
+    const cached = sessionStorage.getItem("home_sets_mtg_v4");
     if (cached) { try { setNewSets(JSON.parse(cached)); return; } catch(_e) {} }
     scryfallFetch("/sets?order=released&direction=desc").then(async data => {
+      const HOME_TYPES = [...MTG_MAIN_SET_TYPES, "commander", "commander_deck"];
       const seenNames = new Set();
       const raw = (data?.data || [])
         .filter(s => {
-          if (s.digital || s.card_count < 10 || !s.released_at || ["token","memorabilia"].includes(s.set_type)) return false;
+          if (s.digital || s.card_count < 10 || !s.released_at) return false;
+          if (!HOME_TYPES.includes(s.set_type)) return false;
           if (seenNames.has(s.name)) return false;
           seenNames.add(s.name);
           return true;
@@ -4301,7 +4303,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
         } catch { return s; }
       }));
       setNewSets(sets);
-      sessionStorage.setItem("home_sets_mtg_v3", JSON.stringify(sets));
+      sessionStorage.setItem("home_sets_mtg_v4", JSON.stringify(sets));
     }).catch(() => {});
   }, []);
 
