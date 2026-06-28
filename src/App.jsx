@@ -325,21 +325,29 @@ async function fetchScryfallPrice(card) {
 
 // ── Pack Opening Views ────────────────────────────────────────────────────────
 
-// Parse a pasted deck list — handles three formats:
-//   Wizards website:  alternating lines of "1" then "Card Name"
-//   Standard MTG:     "1 Card Name"  or  "1x Card Name"
-//   Section headers / blank lines are skipped
+// Parse a pasted deck list — handles:
+//   Archidekt:       "1x CardName (set) 123 *F* [Categories]"
+//   ManaBox/Moxfield:"1 CardName (SET) 123 *F*"  with "// SECTION" headers
+//   Wizards website: alternating lines — "1" then "Card Name"
+//   Standard MTG:    "1 Card Name" or "1x Card Name"
 function parsePastedDecklist(text) {
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   const entries = []; // { name, qty }
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    // Skip pure section headers like "Creature", "Artifact", "30 Cards", etc.
-    if (/^\d+\s+Cards?$/i.test(line) || /^(Creature|Enchantment|Artifact|Instant|Sorcery|Land|Planeswalker|Battle|Sideboard|Maybeboard|Commander)$/i.test(line)) {
+    // Skip ManaBox // section headers and Wizards/type section headers
+    if (line.startsWith("//") || /^\d+\s+Cards?$/i.test(line) ||
+        /^(Creature|Enchantment|Artifact|Instant|Sorcery|Land|Planeswalker|Battle|Sideboard|Maybeboard|Commander|Tokens?)$/i.test(line)) {
       i++; continue;
     }
-    // Wizards website alternating format: a bare number then the card name on next line
+    // Archidekt / ManaBox with set code: "1x CardName (SET) 123 ..." — extract name only
+    const setMatch = line.match(/^(\d+)x?\s+(.+?)\s+\(\w+\)\s+\w+/);
+    if (setMatch) {
+      entries.push({ name: setMatch[2].trim(), qty: parseInt(setMatch[1], 10) });
+      i++; continue;
+    }
+    // Wizards website alternating format: bare number then card name on next line
     if (/^\d+$/.test(line) && i + 1 < lines.length) {
       const next = lines[i + 1];
       if (!/^\d/.test(next) && !/^(Creature|Enchantment|Artifact|Instant|Sorcery|Land)$/i.test(next)) {
@@ -358,15 +366,36 @@ function parsePastedDecklist(text) {
   return entries;
 }
 
-// Commander deck — fetch from Scryfall OR parse a pasted decklist
+// Fetch MTGJSON precon deck list and resolve cards via Scryfall
+async function mtgjsonResolveDeck(fileName) {
+  const res = await fetch(`https://mtgjson.com/api/v5/decks/${fileName}.json`);
+  if (!res.ok) throw new Error("Not found");
+  const json = await res.json();
+  const deck = json.data;
+  const allEntries = [...(deck.commander || []), ...(deck.mainBoard || [])];
+  // Convert MTGJSON card format to our lookup format
+  return allEntries.map(c => ({
+    name: c.name,
+    qty:  c.count || 1,
+    set:  (c.setCode || "").toLowerCase(),
+    number: String(c.number || ""),
+    foil: !!c.isFoil,
+  }));
+}
+
+// Commander deck — fetch from Scryfall, MTGJSON precon picker, or paste
 function CommanderDeckImportSession({ box, onDone, onCancel }) {
   const [fetchStatus, setFetchStatus] = useState("loading"); // loading | done | error
   const [setCards, setSetCards]       = useState([]); // normalized Scryfall cards for this set
-  const [mode, setMode]               = useState("auto"); // auto | paste
+  const [mode, setMode]               = useState("auto"); // auto | precon | paste
   const [pasteText, setPasteText]     = useState("");
   const [resolving, setResolving]     = useState(false);
   const [resolved, setResolved]       = useState(null); // { cards, notFound }
   const [resolveErr, setResolveErr]   = useState("");
+  // MTGJSON precon state
+  const [preconList, setPreconList]   = useState(null); // null=loading, []=done
+  const [preconErr, setPreconErr]     = useState("");
+  const [preconLoading, setPreconLoading] = useState(false);
 
   // Fetch all cards for this set from Scryfall
   React.useEffect(() => {
@@ -378,8 +407,31 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
     }).catch(() => setFetchStatus("error"));
   }, [box.setId]);
 
-  // Decide which mode to use once we have the set card list
+  // Once we know it's a multi-deck set, try to load MTGJSON precon list
   const needsPaste = fetchStatus === "done" && (setCards.length === 0 || setCards.length > 115);
+  React.useEffect(() => {
+    if (!needsPaste || preconList !== null) return;
+    fetch("https://mtgjson.com/api/v5/DeckList.json")
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(json => {
+        const all = json.data || [];
+        // Match by set code OR by set name keywords (first 2 words)
+        const codeUp = (box.setId || "").toUpperCase();
+        const nameWords = (box.setName || "").toLowerCase().split(/\s+/).slice(0, 3);
+        const matches = all.filter(d => {
+          if (d.code?.toUpperCase() === codeUp) return true;
+          const dn = (d.name || "").toLowerCase();
+          return nameWords.some(w => w.length > 3 && dn.includes(w));
+        });
+        setPreconList(matches.length ? matches : all); // show all if no direct match
+        setMode("precon");
+      })
+      .catch(() => {
+        setPreconList([]);
+        setMode("paste");
+        setPreconErr("Could not load MTGJSON deck list — paste your decklist instead.");
+      });
+  }, [needsPaste]);
 
   // Resolve a pasted list: first try local set cards, then Scryfall name lookup
   const resolvePaste = async () => {
@@ -425,6 +477,67 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
     setResolving(false);
   };
 
+  // Select a precon from MTGJSON, resolve via Scryfall batch
+  const selectPrecon = async (deck) => {
+    setPreconLoading(true); setPreconErr(""); setResolveErr("");
+    try {
+      const entries = await mtgjsonResolveDeck(deck.fileName);
+      // Reuse resolvePaste logic via synthetic pasteText won't work here —
+      // directly use Scryfall batch with set+number (better than name-only)
+      const nameMap = {};
+      setCards.forEach(c => { nameMap[(c.name || "").toLowerCase()] = c; });
+      const found = [], notFound = [];
+      const needNetwork = entries.filter(e => !nameMap[e.name.toLowerCase()]);
+      // Local hits
+      entries.forEach(({ name, qty }) => {
+        const local = nameMap[name.toLowerCase()];
+        if (local) for (let q = 0; q < qty; q++) found.push(local);
+      });
+      // Network resolve for the rest — use set+number first then name fallback
+      if (needNetwork.length) {
+        const CHUNK = 75;
+        for (let i = 0; i < needNetwork.length; i += CHUNK) {
+          const chunk = needNetwork.slice(i, i + CHUNK);
+          try {
+            const r1 = await fetch("https://api.scryfall.com/cards/collection", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ identifiers: chunk.map(e => ({ set: e.set, collector_number: e.number })) }),
+            });
+            const d1 = r1.ok ? await r1.json() : { data: [] };
+            const bySetNum = {};
+            (d1.data || []).forEach(c => { bySetNum[`${c.set}:${c.collector_number}`] = normalizeScryfallCard(c); });
+            const stillMissing = [];
+            chunk.forEach(({ name, qty, set, number }) => {
+              const card = bySetNum[`${set}:${number}`];
+              if (card) for (let q = 0; q < qty; q++) found.push(card);
+              else stillMissing.push({ name, qty });
+            });
+            // Name fallback
+            if (stillMissing.length) {
+              const r2 = await fetch("https://api.scryfall.com/cards/collection", {
+                method:"POST", headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({ identifiers: stillMissing.map(e => ({ name: e.name })) }),
+              });
+              const d2 = r2.ok ? await r2.json() : { data: [] };
+              const byName = {};
+              (d2.data || []).forEach(c => { byName[c.name.toLowerCase()] = normalizeScryfallCard(c); });
+              stillMissing.forEach(({ name, qty }) => {
+                const card = byName[name.toLowerCase()];
+                if (card) for (let q = 0; q < qty; q++) found.push(card);
+                else notFound.push(name);
+              });
+            }
+          } catch { chunk.forEach(({ name }) => notFound.push(name)); }
+          if (i + CHUNK < needNetwork.length) await new Promise(r => setTimeout(r, 150));
+        }
+      }
+      setResolved({ cards: found, notFound });
+    } catch(e) {
+      setPreconErr(`Could not load "${deck.name}" — try paste mode.`);
+    }
+    setPreconLoading(false);
+  };
+
   const handleAddAll = (cards) => {
     const items = cards.map((card, i) => ({
       card, condition: "near_mint", foil: false,
@@ -460,7 +573,7 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
 
       <div style={{ flex:1, overflowY:"auto", padding:"20px 20px" }}>
 
-        {/* Loading */}
+        {/* Loading Scryfall */}
         {fetchStatus === "loading" && (
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, paddingTop:40 }}>
             <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
@@ -469,19 +582,63 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
           </div>
         )}
 
-        {/* Paste mode — set not in Scryfall yet or combined multi-deck set */}
-        {fetchStatus === "done" && (needsPaste || mode === "paste") && !resolved && (
+        {/* MTGJSON precon picker */}
+        {fetchStatus === "done" && needsPaste && mode === "precon" && !resolved && (
+          <div>
+            <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:12 }}>
+              SELECT YOUR PRECON DECK
+            </div>
+            {preconLoading && (
+              <div style={{ display:"flex", alignItems:"center", gap:10, color:"#555", fontSize:13,
+                padding:"20px 0", justifyContent:"center" }}>
+                <div style={{ width:18, height:18, border:`2px solid ${TEAL}`, borderTopColor:"transparent",
+                  borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
+                Loading deck from MTGJSON…
+              </div>
+            )}
+            {!preconLoading && preconErr && (
+              <div style={{ color:"#f59e0b", fontSize:12, marginBottom:12 }}>{preconErr}</div>
+            )}
+            {!preconLoading && preconList !== null && preconList.length === 0 && (
+              <div style={{ color:"#555", fontSize:13, textAlign:"center", padding:"30px 0" }}>
+                No decks found in MTGJSON yet — try paste mode below.
+              </div>
+            )}
+            {!preconLoading && (preconList || []).map(deck => (
+              <button key={deck.fileName} onClick={() => selectPrecon(deck)}
+                style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
+                  background:"#111", border:`1px solid ${BORDER}`, borderRadius:12,
+                  padding:"14px 16px", marginBottom:8, cursor:"pointer", textAlign:"left",
+                  fontFamily:"inherit" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:"#fff", fontSize:14, fontWeight:600 }}>{deck.name}</div>
+                  <div style={{ color:"#555", fontSize:11, marginTop:2 }}>
+                    {deck.type} · {deck.code} · {deck.releaseDate}
+                  </div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            ))}
+            <button onClick={() => setMode("paste")} style={{ width:"100%", marginTop:8,
+              background:"none", border:`1px solid ${BORDER}`, borderRadius:12,
+              padding:"12px 0", color:"#555", fontSize:12, cursor:"pointer",
+              fontFamily:"inherit" }}>
+              Don't see yours? Paste decklist instead →
+            </button>
+          </div>
+        )}
+
+        {/* Paste mode — fallback */}
+        {fetchStatus === "done" && mode === "paste" && !resolved && (
           <div>
             <div style={{ background:"#111", border:`1px solid ${BORDER}`, borderRadius:14,
               padding:"16px", marginBottom:20 }}>
               <div style={{ color:"#fff", fontSize:14, fontWeight:600, marginBottom:6 }}>
-                {setCards.length === 0
-                  ? "Set not yet in Scryfall — paste your decklist"
-                  : `This set has ${setCards.length} cards across multiple decks — paste your specific deck list`}
+                Paste your decklist
               </div>
               <div style={{ color:"#666", fontSize:12, lineHeight:1.5 }}>
-                Copy the decklist from magic.wizards.com, Moxfield, or Archidekt and paste it below.
-                Supports "1 Card Name", "1x Card Name", and the Wizards alternating format.
+                Supports Archidekt, ManaBox, Moxfield, Wizards website, and standard "1 Card Name" formats.
               </div>
             </div>
 
@@ -640,7 +797,7 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
                 cursor: resolved.cards.length > 0 ? "pointer" : "default" }}>
               ADD {resolved.cards.length} CARDS TO COLLECTION
             </button>
-          ) : (needsPaste || mode === "paste") ? (
+          ) : mode === "paste" ? (
             <button onClick={resolvePaste} disabled={!pasteText.trim()}
               style={{ width:"100%", padding:16, background: pasteText.trim() ? TEAL : "#1a1a1a",
                 border:"none", borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18,
@@ -648,7 +805,7 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
                 cursor: pasteText.trim() ? "pointer" : "default" }}>
               LOOK UP CARDS
             </button>
-          ) : (
+          ) : mode === "precon" ? null : (
             <button onClick={() => handleAddAll(autoCards)} style={{
               width:"100%", padding:16, background:TEAL, border:"none",
               borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18, letterSpacing:1,

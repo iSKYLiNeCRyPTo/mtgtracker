@@ -382,23 +382,45 @@ function NewDeckModal({ onSave, onClose }) {
   );
 }
 
-// ── Archidekt Import Helpers ──────────────────────────────────────────────────
+// ── Deck List Import Helpers ──────────────────────────────────────────────────
+// Supports Archidekt .txt and ManaBox exports
 function parseArchidektTxt(text) {
-  const lines = text.trim().split("\n").filter(l => l.trim());
+  const lines = text.trim().split("\n");
   const entries = [];
   let commanderName = null;
-  for (const line of lines) {
-    const match = line.match(/^(\d+)x (.+?) \((\w+)\) (\w+)(?:\s+\*F\*)?\s*\[([^\]]*)\]$/);
+  let currentSection = ""; // tracks // COMMANDER, // MAINBOARD etc for ManaBox
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // ManaBox / Moxfield section headers: // COMMANDER, // MAINBOARD, // SIDEBOARD
+    if (line.startsWith("//")) {
+      currentSection = line.replace(/^\/\/\s*/, "").toUpperCase();
+      continue;
+    }
+
+    // Archidekt format: "1x CardName (set) 123 *F* [Category,tags]"
+    // ManaBox format:   "1 CardName (SET) 123 *F*"
+    // Unified regex — categories bracket is optional
+    const match = line.match(/^(\d+)x?\s+(.+?)\s+\((\w+)\)\s+(\w+)(?:\s+\*F\*)?\s*(?:\[([^\]]*)\])?\s*$/);
     if (!match) continue;
-    const [, qtyStr, name, set, number, catStr] = match;
+
+    const [, qtyStr, name, set, number, catStr = ""] = match;
+
+    // Skip maybeboard / token placeholders
     if (catStr.includes("{noDeck}")) continue;
+
     const qty  = parseInt(qtyStr, 10);
     const foil = line.includes("*F*");
-    const rawCats  = catStr.split(",").map(c => c.trim());
+
+    // Determine category from Archidekt tags OR from ManaBox section header
+    const rawCats    = catStr ? catStr.split(",").map(c => c.trim()) : [];
     const categories = rawCats.map(c => c.replace(/\{[^}]*\}/g, "").trim()).filter(Boolean);
-    const isCommander = catStr.includes("Commander{top}");
-    if (isCommander) commanderName = name;
-    const primaryCat = isCommander ? "Commander" : (categories[0] || "Other");
+    const isCommander = catStr.includes("Commander{top}") || currentSection === "COMMANDER";
+    if (isCommander && !commanderName) commanderName = name;
+    const primaryCat = isCommander ? "Commander" : (categories[0] || currentSection || "Other");
+
     entries.push({ qty, name, set: set.toLowerCase(), number, foil, categories, primaryCat });
   }
   return { entries, commanderName };
