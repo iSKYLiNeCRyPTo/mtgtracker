@@ -9786,6 +9786,7 @@ function App() {
   const [importing, setImporting] = useState(false);
   const [pendingImportText, setPendingImportText] = useState("");
   const [pendingDeck, setPendingDeck] = useState(null);
+  const [deckMainTab, setDeckMainTab] = useState("decks");
   const [dupeCard, setDupeCard]     = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);
   const [detail, setDetail]         = useState(null);
@@ -10372,7 +10373,7 @@ function App() {
                 </div>
               </div>
             ) : tab==="decks" ? (
-              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)} onCardPress={item=>setDetail(item)}/>
+              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)} onCardPress={item=>setDetail(item)} mainTab={deckMainTab} onMainTabChange={setDeckMainTab}/>
             ) : tab==="collection" ? (
               <CollectionView collection={collection} onCardPress={item=>setDetail(item)} onImport={()=>setImporting(true)} onRefreshPrices={refreshAllPrices} refreshing={refreshing}
                 collSubTab={collSubTab} setCollSubTab={setCollSubTab}
