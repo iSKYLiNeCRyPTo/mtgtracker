@@ -385,173 +385,126 @@ async function mtgjsonResolveDeck(fileName) {
 
 // Commander deck — fetch from Scryfall, MTGJSON precon picker, or paste
 function CommanderDeckImportSession({ box, onDone, onCancel }) {
-  const [fetchStatus, setFetchStatus] = useState("loading"); // loading | done | error
-  const [setCards, setSetCards]       = useState([]); // normalized Scryfall cards for this set
-  const [mode, setMode]               = useState("auto"); // auto | precon | paste
-  const [pasteText, setPasteText]     = useState("");
-  const [resolving, setResolving]     = useState(false);
-  const [resolved, setResolved]       = useState(null); // { cards, notFound }
-  const [resolveErr, setResolveErr]   = useState("");
-  // MTGJSON precon state
-  const [preconList, setPreconList]   = useState(null); // null=loading, []=done
-  const [preconErr, setPreconErr]     = useState("");
+  const [mode, setMode]             = useState("precon"); // precon | paste
+  const [preconList, setPreconList] = useState(null);     // null=loading
+  const [preconErr, setPreconErr]   = useState("");
   const [preconLoading, setPreconLoading] = useState(false);
+  const [pasteText, setPasteText]   = useState("");
+  const [resolving, setResolving]   = useState(false);
+  const [resolved, setResolved]     = useState(null);     // { cards, notFound }
+  const [resolveErr, setResolveErr] = useState("");
 
-  // Fetch all cards for this set from Scryfall
-  React.useEffect(() => {
-    if (!box.setId) { setFetchStatus("done"); return; }
-    fetchSetCards(box.setId).then(cards => {
-      const playable = cards.filter(c => !/(Token|Emblem|Checklist)/i.test(c.type_line || ""));
-      setSetCards(playable.length ? playable : cards);
-      setFetchStatus("done");
-    }).catch(() => setFetchStatus("error"));
-  }, [box.setId]);
+  const TEAL = "#00D4AA";
+  const BORDER = "#1e1e1e";
 
-  // Once we know it's a multi-deck set, try to load MTGJSON precon list
-  const needsPaste = fetchStatus === "done" && (setCards.length === 0 || setCards.length > 115);
+  // On mount: fetch MTGJSON deck list and filter to this set
   React.useEffect(() => {
-    if (!needsPaste || preconList !== null) return;
     fetch("https://mtgjson.com/api/v5/DeckList.json")
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(json => {
         const all = json.data || [];
-        // Match by set code OR by set name keywords (first 2 words)
         const codeUp = (box.setId || "").toUpperCase();
-        const nameWords = (box.setName || "").toLowerCase().split(/\s+/).slice(0, 3);
+        const nameWords = (box.setName || "").toLowerCase().split(/\s+/).filter(w => w.length > 3).slice(0, 3);
         const matches = all.filter(d => {
           if (d.code?.toUpperCase() === codeUp) return true;
           const dn = (d.name || "").toLowerCase();
-          return nameWords.some(w => w.length > 3 && dn.includes(w));
+          return nameWords.some(w => dn.includes(w));
         });
-        setPreconList(matches.length ? matches : all); // show all if no direct match
-        setMode("precon");
+        setPreconList(matches.length ? matches : all);
       })
       .catch(() => {
         setPreconList([]);
         setMode("paste");
-        setPreconErr("Could not load MTGJSON deck list — paste your decklist instead.");
+        setPreconErr("Could not load deck list — paste your decklist instead.");
       });
-  }, [needsPaste]);
+  }, []);
 
-  // Resolve a pasted list: first try local set cards, then Scryfall name lookup
-  const resolvePaste = async () => {
-    const entries = parsePastedDecklist(pasteText);
-    if (!entries.length) { setResolveErr("No card names found — check the format and try again."); return; }
-    setResolving(true); setResolveErr("");
-    const nameMap = {};
-    setCards.forEach(c => { nameMap[(c.name || "").toLowerCase()] = c; });
-
-    const found = [], notFound = [];
-    const needNetwork = [];
-    for (const { name, qty } of entries) {
-      const local = nameMap[name.toLowerCase()];
-      if (local) { for (let q = 0; q < qty; q++) found.push(local); }
-      else needNetwork.push({ name, qty });
-    }
-
-    // Batch Scryfall name lookups for cards not in the local set list
-    if (needNetwork.length) {
-      const CHUNK = 75;
-      for (let i = 0; i < needNetwork.length; i += CHUNK) {
-        const chunk = needNetwork.slice(i, i + CHUNK);
-        try {
-          const res = await fetch("https://api.scryfall.com/cards/collection", {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ identifiers: chunk.map(e => ({ name: e.name })) }),
-          });
-          const data = await res.json();
-          const byName = {};
-          (data.data || []).forEach(c => { byName[c.name.toLowerCase()] = normalizeScryfallCard(c); });
-          chunk.forEach(({ name, qty }) => {
-            const card = byName[name.toLowerCase()];
-            if (card) { for (let q = 0; q < qty; q++) found.push(card); }
-            else notFound.push(name);
-          });
-        } catch { chunk.forEach(({ name }) => notFound.push(name)); }
-        if (i + CHUNK < needNetwork.length) await new Promise(r => setTimeout(r, 150));
-      }
-    }
-
-    setResolved({ cards: found, notFound });
-    setResolving(false);
-  };
-
-  // Select a precon from MTGJSON, resolve via Scryfall batch
+  // User picks a deck from the list — fetch full card list from MTGJSON then resolve via Scryfall
   const selectPrecon = async (deck) => {
     setPreconLoading(true); setPreconErr(""); setResolveErr("");
     try {
       const entries = await mtgjsonResolveDeck(deck.fileName);
-      // Reuse resolvePaste logic via synthetic pasteText won't work here —
-      // directly use Scryfall batch with set+number (better than name-only)
-      const nameMap = {};
-      setCards.forEach(c => { nameMap[(c.name || "").toLowerCase()] = c; });
       const found = [], notFound = [];
-      const needNetwork = entries.filter(e => !nameMap[e.name.toLowerCase()]);
-      // Local hits
-      entries.forEach(({ name, qty }) => {
-        const local = nameMap[name.toLowerCase()];
-        if (local) for (let q = 0; q < qty; q++) found.push(local);
-      });
-      // Network resolve for the rest — use set+number first then name fallback
-      if (needNetwork.length) {
-        const CHUNK = 75;
-        for (let i = 0; i < needNetwork.length; i += CHUNK) {
-          const chunk = needNetwork.slice(i, i + CHUNK);
-          try {
-            const r1 = await fetch("https://api.scryfall.com/cards/collection", {
-              method:"POST", headers:{"Content-Type":"application/json"},
-              body: JSON.stringify({ identifiers: chunk.map(e => ({ set: e.set, collector_number: e.number })) }),
-            });
-            const d1 = r1.ok ? await r1.json() : { data: [] };
-            const bySetNum = {};
-            (d1.data || []).forEach(c => { bySetNum[`${c.set}:${c.collector_number}`] = normalizeScryfallCard(c); });
-            const stillMissing = [];
-            chunk.forEach(({ name, qty, set, number }) => {
-              const card = bySetNum[`${set}:${number}`];
-              if (card) for (let q = 0; q < qty; q++) found.push(card);
-              else stillMissing.push({ name, qty });
-            });
-            // Name fallback
-            if (stillMissing.length) {
-              const r2 = await fetch("https://api.scryfall.com/cards/collection", {
-                method:"POST", headers:{"Content-Type":"application/json"},
-                body: JSON.stringify({ identifiers: stillMissing.map(e => ({ name: e.name })) }),
-              });
-              const d2 = r2.ok ? await r2.json() : { data: [] };
-              const byName = {};
-              (d2.data || []).forEach(c => { byName[c.name.toLowerCase()] = normalizeScryfallCard(c); });
-              stillMissing.forEach(({ name, qty }) => {
-                const card = byName[name.toLowerCase()];
-                if (card) for (let q = 0; q < qty; q++) found.push(card);
-                else notFound.push(name);
-              });
-            }
-          } catch { chunk.forEach(({ name }) => notFound.push(name)); }
-          if (i + CHUNK < needNetwork.length) await new Promise(r => setTimeout(r, 150));
+      const CHUNK = 75;
+      for (let i = 0; i < entries.length; i += CHUNK) {
+        const chunk = entries.slice(i, i + CHUNK);
+        // Pass 1: set + collector_number
+        const r1 = await fetch("https://api.scryfall.com/cards/collection", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifiers: chunk.map(e => ({ set: e.set, collector_number: e.number })) }),
+        });
+        const d1 = r1.ok ? await r1.json() : { data: [] };
+        const bySetNum = {};
+        (d1.data || []).forEach(c => { bySetNum[`${c.set}:${c.collector_number}`] = normalizeScryfallCard(c); });
+        const stillMissing = [];
+        chunk.forEach(({ name, qty, set, number }) => {
+          const card = bySetNum[`${set}:${number}`];
+          if (card) for (let q = 0; q < qty; q++) found.push(card);
+          else stillMissing.push({ name, qty });
+        });
+        // Pass 2: name fallback
+        if (stillMissing.length) {
+          const r2 = await fetch("https://api.scryfall.com/cards/collection", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifiers: stillMissing.map(e => ({ name: e.name })) }),
+          });
+          const d2 = r2.ok ? await r2.json() : { data: [] };
+          const byName = {};
+          (d2.data || []).forEach(c => { byName[c.name.toLowerCase()] = normalizeScryfallCard(c); });
+          stillMissing.forEach(({ name, qty }) => {
+            const card = byName[name.toLowerCase()];
+            if (card) for (let q = 0; q < qty; q++) found.push(card);
+            else notFound.push(name);
+          });
         }
+        if (i + CHUNK < entries.length) await new Promise(r => setTimeout(r, 150));
       }
-      setResolved({ cards: found, notFound });
-    } catch(e) {
+      setResolved({ cards: found, notFound, deckName: deck.name });
+    } catch {
       setPreconErr(`Could not load "${deck.name}" — try paste mode.`);
     }
     setPreconLoading(false);
   };
 
-  const handleAddAll = (cards) => {
-    const items = cards.map((card, i) => ({
+  // Paste fallback: resolve card names via Scryfall
+  const resolvePaste = async () => {
+    const entries = parsePastedDecklist(pasteText);
+    if (!entries.length) { setResolveErr("No card names found — check the format and try again."); return; }
+    setResolving(true); setResolveErr("");
+    const found = [], notFound = [];
+    const CHUNK = 75;
+    for (let i = 0; i < entries.length; i += CHUNK) {
+      const chunk = entries.slice(i, i + CHUNK);
+      try {
+        const res = await fetch("https://api.scryfall.com/cards/collection", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifiers: chunk.map(e => ({ name: e.name })) }),
+        });
+        const data = await res.json();
+        const byName = {};
+        (data.data || []).forEach(c => { byName[c.name.toLowerCase()] = normalizeScryfallCard(c); });
+        chunk.forEach(({ name, qty }) => {
+          const card = byName[name.toLowerCase()];
+          if (card) for (let q = 0; q < qty; q++) found.push(card);
+          else notFound.push(name);
+        });
+      } catch { chunk.forEach(({ name }) => notFound.push(name)); }
+      if (i + CHUNK < entries.length) await new Promise(r => setTimeout(r, 150));
+    }
+    setResolved({ cards: found, notFound });
+    setResolving(false);
+  };
+
+  const handleAddAll = () => {
+    const items = resolved.cards.map((card, i) => ({
       card, condition: "near_mint", foil: false,
       id: `${card.id}-${Date.now()}-${i}`,
     }));
     onDone(items);
   };
 
-  const autoCards = setCards; // single-deck set — use all
-  const estCost = (resolved?.cards || autoCards).reduce(
+  const estCost = (resolved?.cards || []).reduce(
     (s, c) => s + parseFloat(c.prices?.usd || c.prices?.usd_foil || 0), 0);
-
-  const TEAL = "#00D4AA";
-  const BORDER = "#1e1e1e";
 
   return (
     <div style={{ position:"fixed", inset:0, background:"#0a0a0a", zIndex:10000, display:"flex", flexDirection:"column" }}>
@@ -559,7 +512,8 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
         padding:"14px 20px", paddingTop:"calc(14px + env(safe-area-inset-top,0px))",
         borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
-        <button onClick={onCancel} style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
+        <button onClick={resolved ? () => setResolved(null) : onCancel}
+          style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
           <Icon.Close size={20} color="#fff"/>
         </button>
         <div style={{ textAlign:"center" }}>
@@ -571,67 +525,73 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
         <div style={{ width:28 }}/>
       </div>
 
-      <div style={{ flex:1, overflowY:"auto", padding:"20px 20px" }}>
+      <div style={{ flex:1, overflowY:"auto", padding:"20px" }}>
 
-        {/* Loading Scryfall */}
-        {fetchStatus === "loading" && (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, paddingTop:40 }}>
-            <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
-              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-            <div style={{ color:"#555", fontSize:13 }}>Fetching deck list from Scryfall…</div>
-          </div>
-        )}
-
-        {/* MTGJSON precon picker */}
-        {fetchStatus === "done" && needsPaste && mode === "precon" && !resolved && (
+        {/* Precon picker */}
+        {mode === "precon" && !resolved && (
           <div>
-            <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:12 }}>
-              SELECT YOUR PRECON DECK
-            </div>
+            {preconList === null && !preconErr && (
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, paddingTop:40 }}>
+                <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+                  borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+                <div style={{ color:"#555", fontSize:13 }}>Loading deck list…</div>
+              </div>
+            )}
             {preconLoading && (
               <div style={{ display:"flex", alignItems:"center", gap:10, color:"#555", fontSize:13,
                 padding:"20px 0", justifyContent:"center" }}>
                 <div style={{ width:18, height:18, border:`2px solid ${TEAL}`, borderTopColor:"transparent",
                   borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
-                Loading deck from MTGJSON…
+                Fetching card list…
               </div>
             )}
-            {!preconLoading && preconErr && (
+            {preconErr && (
               <div style={{ color:"#f59e0b", fontSize:12, marginBottom:12 }}>{preconErr}</div>
             )}
-            {!preconLoading && preconList !== null && preconList.length === 0 && (
-              <div style={{ color:"#555", fontSize:13, textAlign:"center", padding:"30px 0" }}>
-                No decks found in MTGJSON yet — try paste mode below.
-              </div>
-            )}
-            {!preconLoading && (preconList || []).map(deck => (
-              <button key={deck.fileName} onClick={() => selectPrecon(deck)}
-                style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
-                  background:"#111", border:`1px solid ${BORDER}`, borderRadius:12,
-                  padding:"14px 16px", marginBottom:8, cursor:"pointer", textAlign:"left",
-                  fontFamily:"inherit" }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:"#fff", fontSize:14, fontWeight:600 }}>{deck.name}</div>
-                  <div style={{ color:"#555", fontSize:11, marginTop:2 }}>
-                    {deck.type} · {deck.code} · {deck.releaseDate}
-                  </div>
+            {preconList !== null && !preconLoading && (
+              <>
+                <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:12 }}>
+                  SELECT YOUR DECK
                 </div>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2"
-                  strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-              </button>
-            ))}
-            <button onClick={() => setMode("paste")} style={{ width:"100%", marginTop:8,
-              background:"none", border:`1px solid ${BORDER}`, borderRadius:12,
-              padding:"12px 0", color:"#555", fontSize:12, cursor:"pointer",
-              fontFamily:"inherit" }}>
-              Don't see yours? Paste decklist instead →
-            </button>
+                {preconList.length === 0 && (
+                  <div style={{ color:"#555", fontSize:13, textAlign:"center", padding:"30px 0" }}>
+                    No decks found — paste your decklist below.
+                  </div>
+                )}
+                {preconList.map(deck => (
+                  <button key={deck.fileName} onClick={() => selectPrecon(deck)}
+                    style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
+                      background:"#111", border:`1px solid ${BORDER}`, borderRadius:12,
+                      padding:"14px 16px", marginBottom:8, cursor:"pointer", textAlign:"left",
+                      fontFamily:"inherit" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ color:"#fff", fontSize:14, fontWeight:600 }}>{deck.name}</div>
+                      <div style={{ color:"#555", fontSize:11, marginTop:2 }}>
+                        {deck.type} · {deck.code} · {deck.releaseDate}
+                      </div>
+                    </div>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2"
+                      strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                ))}
+                <button onClick={() => setMode("paste")} style={{ width:"100%", marginTop:8,
+                  background:"none", border:`1px solid ${BORDER}`, borderRadius:12,
+                  padding:"12px 0", color:"#555", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+                  Don't see yours? Paste decklist instead →
+                </button>
+              </>
+            )}
           </div>
         )}
 
-        {/* Paste mode — fallback */}
-        {fetchStatus === "done" && mode === "paste" && !resolved && (
+        {/* Paste mode */}
+        {mode === "paste" && !resolved && (
           <div>
+            <button onClick={() => setMode("precon")} style={{ background:"none", border:"none",
+              color:"#555", fontSize:12, cursor:"pointer", padding:"0 0 16px 0", display:"flex",
+              alignItems:"center", gap:6 }}>
+              ← Back to deck list
+            </button>
             <div style={{ background:"#111", border:`1px solid ${BORDER}`, borderRadius:14,
               padding:"16px", marginBottom:20 }}>
               <div style={{ color:"#fff", fontSize:14, fontWeight:600, marginBottom:6 }}>
@@ -641,30 +601,27 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
                 Supports Archidekt, ManaBox, Moxfield, Wizards website, and standard "1 Card Name" formats.
               </div>
             </div>
-
             <textarea
               value={pasteText}
-              onChange={e => { setPasteText(e.target.value); setResolveErr(""); setResolved(null); }}
-              placeholder={"Paste decklist here…\n\nExamples:\n1 Captain America, Team Leader\n1x Sol Ring\n\nOr Wizards website format:\n1\nCaptain America, Team Leader"}
+              onChange={e => { setPasteText(e.target.value); setResolveErr(""); }}
+              placeholder={"1 Captain America, Team Leader\n1x Sol Ring\n\nOr Wizards website format:\n1\nCaptain America, Team Leader"}
               style={{ width:"100%", minHeight:220, padding:14, background:"#111",
                 border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
                 fontSize:13, fontFamily:"monospace", resize:"vertical", outline:"none",
                 boxSizing:"border-box" }}
             />
-            {resolveErr && (
-              <div style={{ color:"#ef4444", fontSize:12, marginTop:8 }}>{resolveErr}</div>
-            )}
+            {resolveErr && <div style={{ color:"#ef4444", fontSize:12, marginTop:8 }}>{resolveErr}</div>}
             {resolving && (
               <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:12, color:"#555", fontSize:13 }}>
                 <div style={{ width:16, height:16, border:`2px solid ${TEAL}`, borderTopColor:"transparent",
                   borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
-                Looking up cards on Scryfall…
+                Looking up cards…
               </div>
             )}
           </div>
         )}
 
-        {/* Resolved paste results */}
+        {/* Results */}
         {resolved && (
           <div>
             <div style={{ background:"#111", border:`1px solid ${BORDER}`, borderRadius:16,
@@ -695,10 +652,6 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
                 {resolved.notFound.map(n => (
                   <div key={n} style={{ color:"#888", fontSize:11 }}>{n}</div>
                 ))}
-                <button onClick={() => setResolved(null)} style={{ marginTop:8, background:"none",
-                  border:"none", color:TEAL, fontSize:11, cursor:"pointer", padding:0 }}>
-                  ← Edit list
-                </button>
               </div>
             )}
 
@@ -731,88 +684,32 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
             </div>
           </div>
         )}
-
-        {/* Auto mode — single deck set, just show all cards */}
-        {fetchStatus === "done" && !needsPaste && mode === "auto" && !resolved && (
-          <div>
-            <div style={{ background:"#111", border:`1px solid ${BORDER}`, borderRadius:16,
-              padding:"20px 24px", marginBottom:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-              <div>
-                <div style={{ color:"#555", fontSize:10, letterSpacing:0.5 }}>CARDS</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, color:"#fff" }}>{autoCards.length}</div>
-              </div>
-              <div>
-                <div style={{ color:"#555", fontSize:10, letterSpacing:0.5 }}>EST. VALUE</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, color:TEAL }}>
-                  ${estCost.toFixed(2)}
-                </div>
-              </div>
-            </div>
-            <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:12 }}>
-              <button onClick={() => setMode("paste")} style={{ background:"none", border:"none",
-                color:"#555", fontSize:11, cursor:"pointer" }}>
-                Wrong deck? Paste list instead →
-              </button>
-            </div>
-            <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:10 }}>
-              ALL {autoCards.length} CARDS
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:100 }}>
-              {autoCards.map(card => {
-                const price = parseFloat(card.prices?.usd || card.prices?.usd_foil || 0);
-                return (
-                  <div key={card.id} style={{ display:"flex", alignItems:"center", gap:10,
-                    background:"#111", borderRadius:10, padding:"8px 12px" }}>
-                    {card.images?.small && (
-                      <img src={card.images.small} alt={card.name}
-                        style={{ height:36, width:26, objectFit:"contain", borderRadius:3, flexShrink:0 }}/>
-                    )}
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ color:"#fff", fontSize:13, fontWeight:600,
-                        whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{card.name}</div>
-                      <div style={{ color:"#555", fontSize:10 }}>#{card.number} · {card.rarity}</div>
-                    </div>
-                    {price > 0 && (
-                      <div style={{ color:TEAL, fontSize:12, fontWeight:700, flexShrink:0 }}>
-                        ${price.toFixed(2)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Bottom action */}
-      {fetchStatus === "done" && !resolving && (
+      {resolved && (
         <div style={{ padding:"12px 20px", paddingBottom:"calc(20px + env(safe-area-inset-bottom,0px))",
           background:"linear-gradient(transparent, #0a0a0a 20%)", borderTop:`1px solid ${BORDER}` }}>
-          {resolved ? (
-            <button onClick={() => handleAddAll(resolved.cards)} disabled={resolved.cards.length === 0}
-              style={{ width:"100%", padding:16, background: resolved.cards.length > 0 ? TEAL : "#1a1a1a",
-                border:"none", borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18,
-                letterSpacing:1, color: resolved.cards.length > 0 ? "#000" : "#444",
-                cursor: resolved.cards.length > 0 ? "pointer" : "default" }}>
-              ADD {resolved.cards.length} CARDS TO COLLECTION
-            </button>
-          ) : mode === "paste" ? (
-            <button onClick={resolvePaste} disabled={!pasteText.trim()}
-              style={{ width:"100%", padding:16, background: pasteText.trim() ? TEAL : "#1a1a1a",
-                border:"none", borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18,
-                letterSpacing:1, color: pasteText.trim() ? "#000" : "#444",
-                cursor: pasteText.trim() ? "pointer" : "default" }}>
-              LOOK UP CARDS
-            </button>
-          ) : mode === "precon" ? null : (
-            <button onClick={() => handleAddAll(autoCards)} style={{
-              width:"100%", padding:16, background:TEAL, border:"none",
-              borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18, letterSpacing:1,
-              color:"#000", cursor:"pointer" }}>
-              ADD ALL {autoCards.length} CARDS TO COLLECTION
-            </button>
-          )}
+          <button onClick={handleAddAll} disabled={resolved.cards.length === 0}
+            style={{ width:"100%", padding:16,
+              background: resolved.cards.length > 0 ? TEAL : "#1a1a1a",
+              border:"none", borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18,
+              letterSpacing:1, color: resolved.cards.length > 0 ? "#000" : "#444",
+              cursor: resolved.cards.length > 0 ? "pointer" : "default" }}>
+            ADD {resolved.cards.length} CARDS TO COLLECTION
+          </button>
+        </div>
+      )}
+      {mode === "paste" && !resolved && !resolving && (
+        <div style={{ padding:"12px 20px", paddingBottom:"calc(20px + env(safe-area-inset-bottom,0px))",
+          background:"linear-gradient(transparent, #0a0a0a 20%)", borderTop:`1px solid ${BORDER}` }}>
+          <button onClick={resolvePaste} disabled={!pasteText.trim()}
+            style={{ width:"100%", padding:16, background: pasteText.trim() ? TEAL : "#1a1a1a",
+              border:"none", borderRadius:16, fontFamily:"'Bebas Neue',sans-serif", fontSize:18,
+              letterSpacing:1, color: pasteText.trim() ? "#000" : "#444",
+              cursor: pasteText.trim() ? "pointer" : "default" }}>
+            LOOK UP CARDS
+          </button>
         </div>
       )}
     </div>
