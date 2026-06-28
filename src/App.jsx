@@ -6079,7 +6079,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
                 for the nav, which pushed bottom:0 stickiness past the visible
                 screen edge. */}
             {selected.length > 0 && (
-              <div style={{ position:"sticky", bottom:"calc(60px + env(safe-area-inset-bottom, 0px))", zIndex:5, padding:"16px 20px",
+              <div style={{ position:"sticky", bottom:0, zIndex:5, padding:"16px 20px",
                 paddingBottom:16,
                 borderTop:`1px solid ${BORDER}`, borderBottom:`1px solid ${BORDER}`,
                 background:"#0d0d0d", boxShadow:"0 4px 16px rgba(0,0,0,0.5)" }}>
@@ -6387,7 +6387,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
 
       {/* Bulk action bar */}
       {bulkMode && bulkSelected.size > 0 && (
-        <div style={{ position:"sticky", bottom:"calc(60px + env(safe-area-inset-bottom, 0px))", zIndex:10,
+        <div style={{ position:"sticky", bottom:0, zIndex:10,
           padding:"14px 20px", borderTop:`1px solid ${BORDER}`, background:"#0d0d0d",
           boxShadow:"0 -4px 20px rgba(0,0,0,0.6)", display:"flex", gap:10, alignItems:"center" }}>
           <span style={{ color:"#888", fontSize:12, flex:1 }}>{bulkSelected.size} selected</span>
@@ -9484,7 +9484,6 @@ function App() {
           paddingTop: insets.top, overflow:'hidden' }}>
           <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', minHeight:0,
             WebkitOverflowScrolling:'touch', overscrollBehavior:'contain',
-            paddingBottom: isDesktop ? 0 : (60 + bottomInset),
             animation:'fadeUp 0.25s ease' }}>
             {detail ? (
               <CardDetailView
@@ -9739,13 +9738,12 @@ function App() {
             ) : null}
           </div>
 
-          {/* Bottom nav — fixed to screen bottom, always visible */}
+          {/* Bottom nav — flex child pinned to the bottom of the column */}
           {!isDesktop && (
             <div style={{
-              position:'fixed', bottom:0, left:0, right:0,
+              flexShrink:0,
               background:'#0d0d0d',
               borderTop:'1px solid #1e1e1e',
-              zIndex:999,
               paddingBottom: bottomInset,
             }}>
               <div style={{ display:'flex', height:60 }}>
