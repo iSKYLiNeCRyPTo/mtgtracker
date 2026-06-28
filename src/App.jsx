@@ -7473,7 +7473,7 @@ function ScanView({ onResult, onClose, setFilter = null, setCards = null, setId 
         const view   = new DataView(globalBuffer);
         const count  = view.getUint32(8, true);
         const dims   = view.getUint32(12, true);
-        const ID_LEN = 20;
+        const ID_LEN = 36; // Scryfall UUID length — must match pipeline build_node.mjs
         const dec    = new TextDecoder("ascii");
 
         // Build set-filtered embeddings list
@@ -8982,7 +8982,16 @@ function GlobalScanFlow({ onDone, onClose, collection = [], setFilter = null, se
         metaRef.current = metaData || {};
         setCardsMeta(metaData || {});
 
-        const fingerprints = await loadGlobalFingerprints().catch(() => ({}));
+        // Cache global fingerprints for 1 hour — re-fetching on every scanner open is slow
+        const FP_TTL = 60 * 60 * 1000;
+        const cachedFp = await idbGet("global-fingerprints-cache");
+        let fingerprints;
+        if (cachedFp?.ts && Date.now() - cachedFp.ts < FP_TTL) {
+          fingerprints = cachedFp.data;
+        } else {
+          fingerprints = await loadGlobalFingerprints().catch(() => ({}));
+          await idbSet("global-fingerprints-cache", { data: fingerprints, ts: Date.now() });
+        }
 
         setIndexStatus("Initialising scanner...");
         const worker = new Worker(new URL("./embedWorker.js", import.meta.url), { type: "module" });
