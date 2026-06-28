@@ -1225,7 +1225,7 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
           <div style={{ position:"relative", height:SC_H + 12, width:Math.max(stackW, SC_W), flexShrink:0 }}>
             {cards.map((c, idx) => {
               const isSel  = selectedCard === c.card.id;
-              const imgSrc = c.card.images?.small || c.card.image_uris?.small;
+              const imgSrc = c.card.images?.small || c.card.image_uris?.small || c.card.card_faces?.[0]?.image_uris?.small;
               return (
                 <button key={c.card.id}
                   onClick={() => setSelectedCard(isSel ? null : c.card.id)}
@@ -1428,8 +1428,8 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
                       style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
                         width:"100%", background: inDeck ? TEAL+"11" : "none",
                         border:"none", borderBottom:`1px solid ${BORDER}`, cursor:"pointer", textAlign:"left" }}>
-                      {card.image_uris?.small && (
-                        <img src={card.image_uris.small} style={{ height:40, borderRadius:3, flexShrink:0 }}/>
+                      {(card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small) && (
+                        <img src={card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small} style={{ height:40, borderRadius:3, flexShrink:0 }}/>
                       )}
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ color: inDeck ? TEAL : "#fff", fontSize:13, fontWeight: inDeck?700:400 }}>
