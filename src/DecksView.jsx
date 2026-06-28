@@ -1045,12 +1045,12 @@ function PortfolioTab({ collection, decks, onAddToDeck, onCardPress }) {
 
 // ── Deck Detail / Editor ──────────────────────────────────────────────────────
 function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
-  const [search, setSearch]         = useState("");
-  const [results, setResults]       = useState([]);
-  const [searching, setSearching]   = useState(false);
-  const [activeType, setActiveType] = useState("All");
-  const [subTab, setSubTab]         = useState("cards");
-  const [groupBy, setGroupBy]       = useState("category"); // "type" | "category"
+  const [search, setSearch]             = useState("");
+  const [results, setResults]           = useState([]);
+  const [searching, setSearching]       = useState(false);
+  const [selectedCard, setSelectedCard] = useState(null); // cardId
+  const [subTab, setSubTab]             = useState("cards");
+  const [groupBy, setGroupBy]           = useState("category"); // "type" | "category"
   const timerRef = useRef(null);
 
   const fmt_obj = FORMATS.find(f => f.id === deck.format) || FORMATS[0];
@@ -1116,8 +1116,34 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
     const t = getCardType(c.card);
     (grouped[t] || (grouped["Other"] = grouped["Other"] || [])) && grouped[t] ? grouped[t].push(c) : grouped["Other"].push(c);
   });
-  const types = ["All", ...TYPE_ORDER.filter(t => grouped[t]?.length > 0)];
-  const displayCards = activeType === "All" ? deck.cards : (grouped[activeType] || []);
+  // Color distribution (for stats)
+  const colorDist = {};
+  deck.cards.forEach(c => {
+    const colors = c.card.colors || [];
+    if (!colors.length) { colorDist["C"] = (colorDist["C"] || 0) + (c.qty || 1); }
+    else colors.forEach(cl => { colorDist[cl] = (colorDist[cl] || 0) + (c.qty || 1); });
+  });
+
+  // Rarity distribution (for stats)
+  const rarityDist = {};
+  deck.cards.forEach(c => {
+    const r = c.card.rarity || "common";
+    rarityDist[r] = (rarityDist[r] || 0) + (c.qty || 1);
+  });
+
+  // Mana curves split by creature vs spell (for stats)
+  const creatureCurve = Array(8).fill(0);
+  const spellCurve    = Array(8).fill(0);
+  deck.cards.forEach(c => {
+    const type = getCardType(c.card);
+    if (type === "Land") return;
+    const cmc = Math.min(Math.floor(c.card?.cmc || 0), 7);
+    if (type === "Creature") creatureCurve[cmc] += (c.qty || 1);
+    else spellCurve[cmc] += (c.qty || 1);
+  });
+
+  // Land / mana source count
+  const landCount = (grouped["Land"] || []).reduce((s, c) => s + (c.qty || 1), 0);
 
   // Category grouping
   const catGroups = {};
@@ -1141,54 +1167,142 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
   }, 0);
   const pips = colorIdentityPips(deck);
 
-  const renderCardRow = (c) => {
-    const price = parseFloat((c.foil ? c.card?.prices?.usd_foil : c.card?.prices?.usd) || c.card?.prices?.usd || 0);
+  // Stack layout constants
+  const SC_W = 76, SC_H = 106, SC_OFF = 30;
+
+  const renderTypeStack = (typeLabel, cards) => {
+    const totalQty  = cards.reduce((s, c) => s + (c.qty || 1), 0);
+    const groupVal  = cards.reduce((s, c) => {
+      const p = parseFloat((c.foil ? c.card?.prices?.usd_foil : c.card?.prices?.usd) || c.card?.prices?.usd || 0);
+      return s + p * (c.qty || 1);
+    }, 0);
+    const activeC   = selectedCard ? cards.find(c => c.card.id === selectedCard) : null;
+    const stackW    = SC_W + Math.max(0, cards.length - 1) * SC_OFF;
+
     return (
-      <div key={c.card.id} style={{ display:"flex", alignItems:"center", gap:10,
-        padding:"10px 0", borderBottom:`1px solid ${BORDER}` }}>
-        <img src={c.card.images?.small || c.card.image_uris?.small}
-          alt={c.card.name}
-          style={{ height:44, borderRadius:4, flexShrink:0 }}
-          onError={e => { e.target.style.display = "none"; }}/>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ color:"#fff", fontSize:13, fontWeight:500,
-            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-            {c.qty > 1 && <span style={{ color:TEAL, fontWeight:700, marginRight:4 }}>{c.qty}×</span>}
-            {c.card.name}
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:2 }}>
-            {price > 0 && <span style={{ color:TEAL, fontSize:11 }}>{fmt(price * (c.qty||1))}</span>}
-            <button onClick={() => toggleOwned(c.card.id)} style={{
-              background:"none", border:`1px solid ${c.owned ? TEAL : "#333"}`,
-              borderRadius:6, color: c.owned ? TEAL : "#444", fontSize:9,
-              padding:"1px 6px", cursor:"pointer", fontFamily:"inherit", fontWeight: c.owned ? 700 : 400,
-            }}>{c.owned ? "OWNED" : "NEED"}</button>
-            <button onClick={() => toggleFoil(c.card.id)} style={{
-              background:"none", border:`1px solid ${c.foil ? "#f59e0b" : "#333"}`,
-              borderRadius:6, color: c.foil ? "#f59e0b" : "#444", fontSize:9,
-              padding:"1px 6px", cursor:"pointer", fontFamily:"inherit",
-            }}>FOIL</button>
+      <div key={typeLabel} style={{ marginBottom:18 }}>
+        {/* Group header */}
+        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"0 16px", marginBottom:8 }}>
+          <span style={{ color:"#888", fontSize:10, letterSpacing:1, fontWeight:700 }}>
+            {typeLabel.toUpperCase()}
+          </span>
+          <span style={{ color:"#555", fontSize:10, background:"#1a1a1a", borderRadius:8,
+            padding:"1px 6px", border:`1px solid ${BORDER}` }}>{totalQty}</span>
+          {groupVal > 0 && (
+            <span style={{ color:TEAL, fontSize:10, marginLeft:"auto" }}>{fmt(groupVal)}</span>
+          )}
+        </div>
+
+        {/* Horizontal fan of card art */}
+        <div style={{ overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch",
+          paddingLeft:16, paddingRight:16, paddingBottom:4 }}>
+          <div style={{ position:"relative", height:SC_H + 12, width:Math.max(stackW, SC_W), flexShrink:0 }}>
+            {cards.map((c, idx) => {
+              const isSel  = selectedCard === c.card.id;
+              const imgSrc = c.card.images?.small || c.card.image_uris?.small;
+              return (
+                <button key={c.card.id}
+                  onClick={() => setSelectedCard(isSel ? null : c.card.id)}
+                  style={{
+                    position:"absolute", left: idx * SC_OFF, bottom:0,
+                    width:SC_W, height:SC_H,
+                    zIndex: isSel ? cards.length + 10 : idx + 1,
+                    cursor:"pointer",
+                    transform: isSel ? "translateY(-10px)" : "none",
+                    transition:"transform 0.15s ease, box-shadow 0.15s ease",
+                    borderRadius:6, overflow:"hidden", padding:0,
+                    border: isSel ? `2px solid ${TEAL}` : "2px solid #111",
+                    boxShadow: isSel ? `0 6px 18px ${TEAL}55` : "0 2px 6px #00000077",
+                    background:"#111",
+                  }}>
+                  {imgSrc ? (
+                    <img src={imgSrc} alt={c.card.name}
+                      style={{ width:"100%", height:"100%", objectFit:"cover", objectPosition:"top", display:"block" }}/>
+                  ) : (
+                    <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
+                      justifyContent:"center", padding:4 }}>
+                      <span style={{ color:"#333", fontSize:7, textAlign:"center" }}>{c.card.name}</span>
+                    </div>
+                  )}
+                  {c.qty > 1 && (
+                    <div style={{ position:"absolute", top:3, right:3, background:"rgba(0,0,0,0.85)",
+                      borderRadius:4, padding:"1px 4px", fontSize:10, color:TEAL, fontWeight:700 }}>
+                      {c.qty}×
+                    </div>
+                  )}
+                  {!c.owned && (
+                    <div style={{ position:"absolute", bottom:0, left:0, right:0, height:3,
+                      background:"#ef4444", borderRadius:"0 0 4px 4px" }}/>
+                  )}
+                  {c.foil && (
+                    <div style={{ position:"absolute", top:3, left:3, background:"rgba(0,0,0,0.75)",
+                      borderRadius:4, padding:"1px 4px", fontSize:7, color:"#f59e0b", fontWeight:700 }}>
+                      ✦
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
-        {!fmt_obj.singleton && (
-          <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
-            <button onClick={() => setQty(c.card.id, (c.qty||1)-1)} style={{
-              width:28, height:28, borderRadius:"6px 0 0 6px", background:"#1a1a1a",
-              border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:16, lineHeight:1,
-            }}>−</button>
-            <div style={{ width:28, height:28, background:"#111", border:`1px solid ${BORDER}`,
-              borderLeft:"none", borderRight:"none",
-              display:"flex", alignItems:"center", justifyContent:"center",
-              color:"#fff", fontSize:13, fontWeight:700 }}>{c.qty||1}</div>
-            <button onClick={() => setQty(c.card.id, (c.qty||1)+1)} style={{
-              width:28, height:28, borderRadius:"0 6px 6px 0", background:"#1a1a1a",
-              border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:16, lineHeight:1,
-            }}>+</button>
+
+        {/* Selected card detail tray */}
+        {activeC && (
+          <div style={{ margin:"6px 16px 0", background:"#0f0f0f", border:`1px solid ${BORDER}`,
+            borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ color:"#fff", fontSize:13, fontWeight:600,
+                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {activeC.card.name}
+              </div>
+              <div style={{ color:"#555", fontSize:10, marginTop:1,
+                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {activeC.card.type_line}
+                {activeC.card.power != null && ` · ${activeC.card.power}/${activeC.card.toughness}`}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5, flexWrap:"wrap" }}>
+                {(() => {
+                  const price = parseFloat((activeC.foil ? activeC.card?.prices?.usd_foil : activeC.card?.prices?.usd) || activeC.card?.prices?.usd || 0);
+                  return price > 0 && (
+                    <span style={{ color:TEAL, fontSize:12, fontWeight:700 }}>
+                      {fmt(price * (activeC.qty || 1))}
+                    </span>
+                  );
+                })()}
+                <button onClick={() => toggleOwned(activeC.card.id)} style={{
+                  background:"none", border:`1px solid ${activeC.owned ? TEAL : "#333"}`,
+                  borderRadius:6, color: activeC.owned ? TEAL : "#555", fontSize:9,
+                  padding:"2px 8px", cursor:"pointer", fontFamily:"inherit", fontWeight: activeC.owned ? 700 : 400,
+                }}>{activeC.owned ? "OWNED" : "NEED"}</button>
+                <button onClick={() => toggleFoil(activeC.card.id)} style={{
+                  background:"none", border:`1px solid ${activeC.foil ? "#f59e0b" : "#333"}`,
+                  borderRadius:6, color: activeC.foil ? "#f59e0b" : "#555", fontSize:9,
+                  padding:"2px 8px", cursor:"pointer", fontFamily:"inherit",
+                }}>FOIL</button>
+              </div>
+            </div>
+            {!fmt_obj.singleton && (
+              <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+                <button onClick={() => setQty(activeC.card.id, (activeC.qty||1)-1)} style={{
+                  width:30, height:30, borderRadius:"8px 0 0 8px", background:"#1a1a1a",
+                  border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:18, lineHeight:1,
+                }}>−</button>
+                <div style={{ width:30, height:30, background:"#111", border:`1px solid ${BORDER}`,
+                  borderLeft:"none", borderRight:"none", display:"flex", alignItems:"center",
+                  justifyContent:"center", color:"#fff", fontSize:13, fontWeight:700 }}>
+                  {activeC.qty||1}
+                </div>
+                <button onClick={() => setQty(activeC.card.id, (activeC.qty||1)+1)} style={{
+                  width:30, height:30, borderRadius:"0 8px 8px 0", background:"#1a1a1a",
+                  border:`1px solid ${BORDER}`, color:"#888", cursor:"pointer", fontSize:18, lineHeight:1,
+                }}>+</button>
+              </div>
+            )}
+            <button onClick={() => { removeCard(activeC.card.id); setSelectedCard(null); }} style={{
+              background:"none", border:"none", cursor:"pointer", color:"#ef4444", padding:4, fontSize:18,
+            }}>✕</button>
           </div>
         )}
-        <button onClick={() => removeCard(c.card.id)} style={{
-          background:"none", border:"none", cursor:"pointer", color:"#333", padding:4,
-        }}>✕</button>
       </div>
     );
   };
@@ -1236,21 +1350,13 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
 
       {/* Sub-tabs */}
       <div style={{ display:"flex", borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
-        {[["cards","Cards"], ["missing","Missing"], ["stats","Stats"]].map(([id, label]) => (
+        {[["cards","Cards"], ["stats","Stats"]].map(([id, label]) => (
           <button key={id} onClick={() => setSubTab(id)} style={{
             flex:1, padding:"11px 0", background:"none", border:"none",
             borderBottom: subTab===id ? `2px solid ${TEAL}` : "2px solid transparent",
             color: subTab===id ? TEAL : "#555", fontSize:12, fontWeight: subTab===id ? 700 : 400,
             cursor:"pointer", fontFamily:"inherit", letterSpacing:0.3,
-          }}>
-            {label}
-            {id === "missing" && missingCards.length > 0 && (
-              <span style={{ marginLeft:4, background:"#ef4444", color:"#fff", fontSize:9,
-                borderRadius:10, padding:"1px 5px" }}>
-                {missingCards.reduce((s,c)=>s+(c.qty||1),0)}
-              </span>
-            )}
-          </button>
+          }}>{label}</button>
         ))}
       </div>
 
@@ -1315,44 +1421,24 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
               <div style={{ padding:"8px 16px", color:"#444", fontSize:12 }}>Searching Scryfall…</div>
             )}
 
-            {/* Group-by toggle + type filters */}
-            {deck.cards.length > 0 && (
-              <div style={{ flexShrink:0 }}>
-                {hasCats && (
-                  <div style={{ padding:"10px 16px 4px", display:"flex", gap:6, alignItems:"center" }}>
-                    <span style={{ color:"#444", fontSize:10, letterSpacing:0.5 }}>GROUP:</span>
-                    {["category","type"].map(g => (
-                      <button key={g} onClick={() => setGroupBy(g)} style={{
-                        padding:"4px 12px", borderRadius:20, cursor:"pointer",
-                        background: groupBy===g ? TEAL+"22" : "#1a1a1a",
-                        border: `1.5px solid ${groupBy===g ? TEAL : BORDER}`,
-                        color: groupBy===g ? TEAL : "#555",
-                        fontSize:11, fontFamily:"inherit", fontWeight: groupBy===g ? 700 : 400,
-                      }}>{g === "category" ? "Category" : "Type"}</button>
-                    ))}
-                  </div>
-                )}
-                {(!hasCats || groupBy === "type") && (
-                  <div style={{ padding:"6px 16px 0", display:"flex", gap:6, overflowX:"auto",
-                    scrollbarWidth:"none" }}>
-                    {types.map(t => (
-                      <button key={t} onClick={() => setActiveType(t)} style={{
-                        flexShrink:0, padding:"5px 12px", borderRadius:20, cursor:"pointer",
-                        background: activeType===t ? TEAL+"22" : "#1a1a1a",
-                        border: `1.5px solid ${activeType===t ? TEAL : BORDER}`,
-                        color: activeType===t ? TEAL : "#555", fontSize:11, fontFamily:"inherit",
-                        fontWeight: activeType===t ? 700 : 400,
-                      }}>
-                        {t} {t !== "All" && `(${grouped[t]?.length || 0})`}
-                      </button>
-                    ))}
-                  </div>
-                )}
+            {/* Group-by toggle (only when deck has categories) */}
+            {hasCats && deck.cards.length > 0 && (
+              <div style={{ padding:"10px 16px 4px", display:"flex", gap:6, alignItems:"center" }}>
+                <span style={{ color:"#444", fontSize:10, letterSpacing:0.5 }}>GROUP:</span>
+                {["category","type"].map(g => (
+                  <button key={g} onClick={() => setGroupBy(g)} style={{
+                    padding:"4px 12px", borderRadius:20, cursor:"pointer",
+                    background: groupBy===g ? TEAL+"22" : "#1a1a1a",
+                    border: `1.5px solid ${groupBy===g ? TEAL : BORDER}`,
+                    color: groupBy===g ? TEAL : "#555",
+                    fontSize:11, fontFamily:"inherit", fontWeight: groupBy===g ? 700 : 400,
+                  }}>{g === "category" ? "Category" : "Type"}</button>
+                ))}
               </div>
             )}
 
-            {/* Card list */}
-            <div style={{ padding:"10px 16px 20px" }}>
+            {/* Stacked card groups */}
+            <div style={{ paddingTop:10, paddingBottom:80 }}>
               {deck.cards.length === 0 ? (
                 <div style={{ textAlign:"center", padding:"40px 0", color:"#333" }}>
                   <div style={{ marginBottom:8, display:"flex", justifyContent:"center" }}>
@@ -1365,91 +1451,66 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
                   <div style={{ fontSize:13 }}>Search above to add cards</div>
                 </div>
               ) : hasCats && groupBy === "category" ? (
-                catOrder.filter(cat => catGroups[cat]?.length > 0).map(cat => (
-                  <div key={cat}>
-                    <div style={{ color:"#555", fontSize:10, letterSpacing:0.8, fontWeight:700,
-                      padding:"14px 0 6px", marginBottom:2, display:"flex", justifyContent:"space-between" }}>
-                      <span>{cat.toUpperCase()}</span>
-                      <span style={{ color:"#333" }}>
-                        {catGroups[cat].reduce((s,c)=>s+(c.qty||1),0)}
-                      </span>
-                    </div>
-                    {catGroups[cat].map(c => renderCardRow(c))}
-                  </div>
-                ))
+                catOrder.filter(cat => catGroups[cat]?.length > 0).map(cat =>
+                  renderTypeStack(cat, catGroups[cat])
+                )
               ) : (
-                displayCards.map(c => renderCardRow(c))
+                TYPE_ORDER.filter(t => grouped[t]?.length > 0).map(t =>
+                  renderTypeStack(t, grouped[t])
+                )
               )}
             </div>
           </>
         )}
 
-        {/* ── Missing tab ── */}
-        {subTab === "missing" && (
-          <div style={{ padding:"16px" }}>
-            {missingCards.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"40px 0" }}>
-                <div style={{ fontSize:32, marginBottom:8 }}>✅</div>
-                <div style={{ color:TEAL, fontWeight:700, marginBottom:4 }}>Deck complete!</div>
-                <div style={{ color:"#555", fontSize:13 }}>You own all cards in this deck.</div>
-              </div>
-            ) : (
-              <>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:16 }}>
-                  <div style={{ color:"#555", fontSize:13 }}>
-                    {missingCards.reduce((s,c)=>s+(c.qty||1),0)} cards needed
-                  </div>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"#ef4444" }}>
-                    {fmt(missingValue)} to complete
-                  </div>
-                </div>
-                {[...missingCards].sort((a,b) => parseFloat(b.card?.prices?.usd||0) - parseFloat(a.card?.prices?.usd||0)).map(c => {
-                  const price = parseFloat(c.card?.prices?.usd || 0);
-                  return (
-                    <div key={c.card.id} style={{ display:"flex", alignItems:"center", gap:10,
-                      padding:"10px 0", borderBottom:`1px solid ${BORDER}` }}>
-                      <img src={c.card.images?.small || c.card.image_uris?.small}
-                        style={{ height:44, borderRadius:4, flexShrink:0 }}
-                        onError={e => { e.target.style.display="none"; }}/>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ color:"#fff", fontSize:13 }}>{c.card.name}</div>
-                        <div style={{ color:"#555", fontSize:11 }}>{c.card.set?.name || c.card.set_name}</div>
-                      </div>
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ color:"#ef4444", fontSize:14, fontWeight:700 }}>
-                          {c.qty > 1 ? `${c.qty}×` : ""}{fmt(price * (c.qty||1))}
-                        </div>
-                        {c.card.scryfall_uri && (
-                          <a href={c.card.scryfall_uri} target="_blank" rel="noopener noreferrer"
-                            style={{ color:TEAL, fontSize:10, textDecoration:"none" }}>Scryfall ↗</a>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
-        )}
-
         {/* ── Stats tab ── */}
         {subTab === "stats" && (
-          <div style={{ padding:"16px", display:"flex", flexDirection:"column", gap:14 }}>
+          <div style={{ padding:"16px", display:"flex", flexDirection:"column", gap:14, paddingBottom:80 }}>
+
+            {/* Overview grid */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
               {[
-                ["Total Cards", `${totalCards} / ${fmt_obj.maxCards}`],
-                ["Owned", `${totalOwned} / ${totalCards}`],
-                ["Deck Value", fmt(totalValue)],
-                ["Still Need", fmt(missingValue)],
-              ].map(([label, val]) => (
+                ["Total Cards", `${totalCards} / ${fmt_obj.maxCards}`, "#fff"],
+                ["Owned", `${totalOwned} / ${totalCards}`, totalOwned === totalCards ? TEAL : "#fff"],
+                ["Deck Value", fmt(totalValue), TEAL],
+                ["Still Need", fmt(missingValue), missingValue > 0 ? "#ef4444" : TEAL],
+              ].map(([label, val, color]) => (
                 <div key={label} style={{ background:CARD, borderRadius:12, padding:"12px 14px",
                   border:`1px solid ${BORDER}` }}>
                   <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:4 }}>{label.toUpperCase()}</div>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:"#fff" }}>{val}</div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color }}>{val}</div>
                 </div>
               ))}
             </div>
 
+            {/* Mana Sources vs Avg CMC */}
+            {deck.cards.length > 0 && (() => {
+              const nonLandSpells = deck.cards.filter(c => getCardType(c.card) !== "Land");
+              const totalSpells   = nonLandSpells.reduce((s,c) => s + (c.qty||1), 0);
+              const totalCmc      = nonLandSpells.reduce((s,c) => s + (c.card?.cmc||0)*(c.qty||1), 0);
+              const avgCmc        = totalSpells > 0 ? (totalCmc/totalSpells).toFixed(2) : "0.00";
+              const manaRatio     = landCount > 0 && totalSpells > 0
+                ? (landCount / totalCards * 100).toFixed(0) : 0;
+              return (
+                <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
+                  <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:12 }}>MANA ANALYSIS</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+                    {[
+                      ["Mana Sources", landCount, TEAL],
+                      ["Avg CMC", avgCmc, "#a78bfa"],
+                      ["Land %", `${manaRatio}%`, "#f59e0b"],
+                    ].map(([lbl, v, c]) => (
+                      <div key={lbl} style={{ textAlign:"center" }}>
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:c }}>{v}</div>
+                        <div style={{ color:"#444", fontSize:9, letterSpacing:0.3 }}>{lbl.toUpperCase()}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Record */}
             <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
               <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:10 }}>RECORD</div>
               <div style={{ display:"flex", gap:20 }}>
@@ -1459,16 +1520,65 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color }}>{val}</div>
                   </div>
                 ))}
+                {(() => {
+                  const w = deck.record?.wins||0, l = deck.record?.losses||0, d = deck.record?.draws||0;
+                  const g = w+l+d;
+                  if (!g) return null;
+                  return (
+                    <div style={{ marginLeft:"auto", textAlign:"right" }}>
+                      <div style={{ color:"#444", fontSize:10 }}>WIN RATE</div>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color:TEAL }}>
+                        {Math.round(w/g*100)}%
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
+            {/* Overall mana curve */}
             <ManaCurve cards={deck.cards}/>
 
+            {/* Mana curve: Creatures vs Spells */}
+            {deck.cards.length > 0 && (() => {
+              const maxVal = Math.max(...creatureCurve, ...spellCurve, 1);
+              const labels = ["0","1","2","3","4","5","6","7+"];
+              return (
+                <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
+                  <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:4 }}>CURVE BY TYPE</div>
+                  <div style={{ display:"flex", gap:12, marginBottom:10 }}>
+                    <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:10, color:"#888" }}>
+                      <span style={{ width:10, height:10, borderRadius:2, background:TEAL+"99", display:"inline-block" }}/>
+                      Creatures
+                    </span>
+                    <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:10, color:"#888" }}>
+                      <span style={{ width:10, height:10, borderRadius:2, background:"#a78bfa99", display:"inline-block" }}/>
+                      Instants/Sorceries
+                    </span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"flex-end", gap:3, height:60 }}>
+                    {labels.map((lbl, i) => (
+                      <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                        <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:1, alignItems:"center" }}>
+                          <div style={{ width:"100%", background:TEAL+"99", borderRadius:"2px 2px 0 0",
+                            height: creatureCurve[i] > 0 ? `${(creatureCurve[i]/maxVal)*46}px` : 2 }}/>
+                          <div style={{ width:"100%", background:"#a78bfa99", borderRadius:"2px 2px 0 0",
+                            height: spellCurve[i] > 0 ? `${(spellCurve[i]/maxVal)*46}px` : 2 }}/>
+                        </div>
+                        <span style={{ fontSize:8, color:"#444" }}>{lbl}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Type breakdown */}
             <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
               <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:10 }}>TYPE BREAKDOWN</div>
               {TYPE_ORDER.filter(t => grouped[t]?.length > 0).map(t => {
                 const count = grouped[t].reduce((s,c)=>s+(c.qty||1),0);
-                const pct = totalCards > 0 ? (count/totalCards)*100 : 0;
+                const pct   = totalCards > 0 ? (count/totalCards)*100 : 0;
                 return (
                   <div key={t} style={{ marginBottom:8 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
@@ -1483,6 +1593,101 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
               })}
             </div>
 
+            {/* Color distribution */}
+            {Object.keys(colorDist).length > 0 && (() => {
+              const COLOR_META = {
+                W:{ label:"White", hex:"#f8f3dc" }, U:{ label:"Blue", hex:"#1e6eb5" },
+                B:{ label:"Black", hex:"#8b5cf6" }, R:{ label:"Red", hex:"#ef4444" },
+                G:{ label:"Green", hex:"#22c55e" }, C:{ label:"Colorless", hex:"#888" },
+              };
+              const total = Object.values(colorDist).reduce((a,b)=>a+b,0);
+              return (
+                <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
+                  <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:10 }}>COLOR DISTRIBUTION</div>
+                  {/* Stacked bar */}
+                  <div style={{ display:"flex", height:10, borderRadius:6, overflow:"hidden", marginBottom:10 }}>
+                    {["W","U","B","R","G","C"].filter(c => colorDist[c]).map(c => (
+                      <div key={c} style={{ flex:colorDist[c], background:COLOR_META[c].hex, transition:"flex 0.3s" }}/>
+                    ))}
+                  </div>
+                  {["W","U","B","R","G","C"].filter(c => colorDist[c]).map(c => {
+                    const pct = ((colorDist[c]/total)*100).toFixed(0);
+                    return (
+                      <div key={c} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                        <div style={{ width:10, height:10, borderRadius:2, background:COLOR_META[c].hex, flexShrink:0 }}/>
+                        <span style={{ color:"#888", fontSize:12, flex:1 }}>{COLOR_META[c].label}</span>
+                        <span style={{ color:"#555", fontSize:12 }}>{colorDist[c]} ({pct}%)</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Rarity distribution */}
+            {Object.keys(rarityDist).length > 0 && (() => {
+              const RARITY = {
+                common:   { label:"Common",   color:"#888" },
+                uncommon: { label:"Uncommon", color:"#c0c0c0" },
+                rare:     { label:"Rare",     color:"#f59e0b" },
+                mythic:   { label:"Mythic",   color:"#f97316" },
+              };
+              const total = Object.values(rarityDist).reduce((a,b)=>a+b,0);
+              return (
+                <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
+                  <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:10 }}>RARITY BREAKDOWN</div>
+                  <div style={{ display:"flex", gap:0, height:10, borderRadius:6, overflow:"hidden", marginBottom:10 }}>
+                    {["common","uncommon","rare","mythic"].filter(r => rarityDist[r]).map(r => (
+                      <div key={r} style={{ flex:rarityDist[r], background:RARITY[r].color }}/>
+                    ))}
+                  </div>
+                  {["mythic","rare","uncommon","common"].filter(r => rarityDist[r]).map(r => {
+                    const pct = ((rarityDist[r]/total)*100).toFixed(0);
+                    return (
+                      <div key={r} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                        <div style={{ width:10, height:10, borderRadius:2, background:RARITY[r].color, flexShrink:0 }}/>
+                        <span style={{ color:"#888", fontSize:12, flex:1 }}>{RARITY[r].label}</span>
+                        <span style={{ color:"#555", fontSize:12 }}>{rarityDist[r]} ({pct}%)</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Missing cards */}
+            {missingCards.length > 0 && (
+              <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:10 }}>
+                  <div style={{ color:"#444", fontSize:9, letterSpacing:0.5 }}>MISSING CARDS</div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:16, color:"#ef4444" }}>
+                    {fmt(missingValue)} to complete
+                  </div>
+                </div>
+                {[...missingCards].sort((a,b) => parseFloat(b.card?.prices?.usd||0)-parseFloat(a.card?.prices?.usd||0)).map(c => {
+                  const price = parseFloat(c.card?.prices?.usd || 0);
+                  return (
+                    <div key={c.card.id} style={{ display:"flex", alignItems:"center", gap:10,
+                      padding:"8px 0", borderBottom:`1px solid ${BORDER}` }}>
+                      <img src={c.card.images?.small || c.card.image_uris?.small}
+                        style={{ height:40, borderRadius:4, flexShrink:0 }}
+                        onError={e => { e.target.style.display="none"; }}/>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ color:"#fff", fontSize:12 }}>{c.card.name}</div>
+                        <div style={{ color:"#555", fontSize:10 }}>{c.card.set?.name || c.card.set_name}</div>
+                      </div>
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ color:"#ef4444", fontSize:13, fontWeight:700 }}>
+                          {c.qty > 1 ? `${c.qty}× ` : ""}{fmt(price*(c.qty||1))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Recent games */}
             {(deck.record?.games || []).length > 0 && (
               <div style={{ background:CARD, borderRadius:12, padding:"14px 16px", border:`1px solid ${BORDER}` }}>
                 <div style={{ color:"#444", fontSize:9, letterSpacing:0.5, marginBottom:10 }}>RECENT GAMES</div>
