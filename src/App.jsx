@@ -9638,6 +9638,7 @@ function App() {
   const [priceChecking, setPriceChecking] = useState(false);
   const [importing, setImporting] = useState(false);
   const [pendingImportText, setPendingImportText] = useState("");
+  const [pendingDeck, setPendingDeck] = useState(null);
   const [dupeCard, setDupeCard]     = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);
   const [detail, setDetail]         = useState(null);
@@ -10103,6 +10104,30 @@ function App() {
     }
     setCol(current);
     await saveCollection(current);
+
+    // For commander precons, also build a deck
+    if (box.productType === "commander_deck" && box._autoSelectPrecon) {
+      const cardMap = new Map();
+      for (const c of cardsWithPrices) {
+        const id = c.card.id;
+        if (cardMap.has(id)) { cardMap.get(id).qty += 1; }
+        else cardMap.set(id, { card: c.card, qty: 1, owned: true, foil: c.foil || false, addedAt: Date.now(), primaryCat: "Other" });
+      }
+      const newDeck = {
+        id: `deck-${Date.now()}`,
+        name: box._autoSelectPrecon.name || box.setName,
+        format: "commander",
+        commander: "",
+        cards: [...cardMap.values()],
+        hasCategories: false,
+        estCost: cardsWithPrices.reduce((s, c) => s + parseFloat(c.card.prices?.usd || 0), 0),
+        record: { wins:0, losses:0, draws:0, games:[] },
+        createdAt: Date.now(),
+        source: "precon",
+      };
+      setPendingDeck(newDeck);
+      setTab("decks");
+    }
   };
 
   // Nav sizing — computed after all hooks
@@ -10200,7 +10225,7 @@ function App() {
                 </div>
               </div>
             ) : tab==="decks" ? (
-              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")}/>
+              <DecksView collection={collection} pendingImportText={pendingImportText} onClearPendingImport={()=>setPendingImportText("")} pendingDeck={pendingDeck} onClearPendingDeck={()=>setPendingDeck(null)}/>
             ) : tab==="collection" ? (
               <CollectionView collection={collection} onCardPress={item=>setDetail(item)} onImport={()=>setImporting(true)} onRefreshPrices={refreshAllPrices} refreshing={refreshing}
                 collSubTab={collSubTab} setCollSubTab={setCollSubTab}
