@@ -608,7 +608,14 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
             <div style={{ padding:"10px 16px 20px" }}>
               {deck.cards.length === 0 ? (
                 <div style={{ textAlign:"center", padding:"40px 0", color:"#333" }}>
-                  <div style={{ fontSize:32, marginBottom:8 }}>🃏</div>
+                  <div style={{ marginBottom:8, display:"flex", justifyContent:"center" }}>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                      <rect x="1"   y="5" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.28"/>
+                      <rect x="4.5" y="3" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.58"/>
+                      <rect x="8"   y="1" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.8"/>
+                      <path d="M10.5 5.5h8" stroke="#444" strokeWidth="1.3" strokeLinecap="round"/>
+                    </svg>
+                  </div>
                   <div style={{ fontSize:13 }}>Search above to add cards</div>
                 </div>
               ) : displayCards.map(c => {
@@ -1306,7 +1313,14 @@ export default function DecksView({ collection }) {
 
         {decks.length === 0 ? (
           <div style={{ textAlign:"center", padding:"60px 20px" }}>
-            <div style={{ fontSize:48, marginBottom:12 }}>🃏</div>
+            <div style={{ marginBottom:12, display:"flex", justifyContent:"center" }}>
+              <svg width="56" height="56" viewBox="0 0 24 24" fill="none">
+                <rect x="1"   y="5" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.28"/>
+                <rect x="4.5" y="3" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.58"/>
+                <rect x="8"   y="1" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.8"/>
+                <path d="M10.5 5.5h8" stroke="#444" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+            </div>
             <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#333",
               letterSpacing:1, marginBottom:8 }}>NO DECKS YET</div>
             <div style={{ color:"#444", fontSize:13, marginBottom:24, lineHeight:1.6 }}>
