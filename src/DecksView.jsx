@@ -35,6 +35,27 @@ const FORMAT_COLORS = {
 
 const TYPE_ORDER = ["Creature","Planeswalker","Instant","Sorcery","Artifact","Enchantment","Land","Other"];
 
+const COND_COLORS = { near_mint:"#00D4AA", lightly_played:"#3b82f6", moderately_played:"#f97316", heavily_played:"#ef4444", damaged:"#7f1d1d" };
+const COND_ABBR   = { near_mint:"NM", lightly_played:"LP", moderately_played:"MP", heavily_played:"HP", damaged:"DMG" };
+
+function PortfolioSpark({ history, color = TEAL }) {
+  if (!history?.length) return null;
+  const W = 56, H = 20;
+  const vals = history.map(d => d.price || 0);
+  const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1;
+  const n = vals.length;
+  const pts = vals.map((v, i) => {
+    const x = n > 1 ? (i / (n-1)) * W : W/2;
+    const y = H - ((v-min)/rng)*(H-4)-2;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg width={W} height={H} style={{ display:"block" }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 const fmt = (n) => {
   if (!n || isNaN(n)) return "$0";
   if (n >= 1000) return "$" + (n/1000).toFixed(1) + "k";
@@ -854,8 +875,8 @@ function PortfolioTab({ collection, decks, onAddToDeck, onCardPress }) {
         )}
       </div>
 
-      {/* Card list */}
-      <div style={{ flex:1, overflowY:"auto", padding:"8px 16px 20px" }}>
+      {/* Card grid */}
+      <div style={{ flex:1, overflowY:"auto", padding:"4px 12px 40px" }}>
         {activeCards.length === 0 ? (
           <div style={{ textAlign:"center", padding:"50px 20px", color:"#333" }}>
             <div style={{ fontSize:13 }}>No cards yet — add cards to your collection or import a deck.</div>
@@ -869,56 +890,109 @@ function PortfolioTab({ collection, decks, onAddToDeck, onCardPress }) {
             <div style={{ color:"#444", fontSize:11, marginBottom:8, paddingTop:4 }}>
               {filtered.length.toLocaleString()} card{filtered.length !== 1 ? "s" : ""}
             </div>
-            {filtered.map((item, idx) => {
-              const card = item.card;
-              const price = parseFloat((item.foil ? card?.prices?.usd_foil : card?.prices?.usd) || card?.prices?.usd || 0);
-              const tags  = (item.autoTags || computeAutoTags(card)).slice(0, 3);
-              return (
-                <div key={item.id || idx} style={{ display:"flex", alignItems:"center", gap:10,
-                  padding:"10px 0", borderBottom:`1px solid ${BORDER}`, cursor:"pointer" }}
-                  onClick={() => onCardPress ? onCardPress(item) : setAddingCard(item)}>
-                  <img src={card?.images?.small || card?.image_uris?.small}
-                    alt={card?.name}
-                    style={{ height:44, borderRadius:4, flexShrink:0 }}
-                    onError={e => { e.target.style.display = "none"; }}/>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ color:"#fff", fontSize:13, fontWeight:500,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {card?.name}
-                    </div>
-                    <div style={{ display:"flex", gap:4, marginTop:3, flexWrap:"wrap", alignItems:"center" }}>
-                      {item._deckSource && (
-                        <span style={{ fontSize:9, padding:"1px 5px", borderRadius:10,
-                          background:"#00D4AA22", border:"1px solid #00D4AA44", color:TEAL,
-                          whiteSpace:"nowrap" }}>
-                          {item._deckSource}
-                        </span>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:10 }}>
+              {filtered.map((item, idx) => {
+                const card = item.card;
+                const price = parseFloat((item.foil ? card?.prices?.usd_foil : card?.prices?.usd) || card?.prices?.usd || 0);
+                const tags  = (item.autoTags || computeAutoTags(card)).filter(t => {
+                  const m = getTagMeta(t);
+                  return m?.cat === "role" || m?.cat === "keyword";
+                }).slice(0, 2);
+                const condColor = item.condition ? (COND_COLORS[item.condition] || TEAL) : null;
+                const condAbbr  = item.condition ? (COND_ABBR[item.condition] || "NM") : null;
+                return (
+                  <div key={item.id || idx}
+                    onClick={() => onCardPress ? onCardPress(item) : setAddingCard(item)}
+                    style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:16,
+                      overflow:"hidden", cursor:"pointer", transition:"border-color 0.15s" }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = TEAL+"44"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; }}>
+
+                    {/* Card image */}
+                    <div style={{ position:"relative" }}>
+                      {card?.images?.small ? (
+                        <img src={card.images.small} alt={card.name} loading="lazy"
+                          style={{ width:"100%", aspectRatio:"63/88", objectFit:"cover",
+                            display:"block", background:"#1a1a1a" }}
+                          onError={e => { e.target.style.display="none"; }}/>
+                      ) : (
+                        <div style={{ width:"100%", aspectRatio:"63/88", background:"#1a1a1a",
+                          display:"flex", alignItems:"center", justifyContent:"center", padding:6 }}>
+                          <span style={{ color:"#333", fontSize:9, textAlign:"center" }}>{card?.name}</span>
+                        </div>
                       )}
-                      {tags.map(tag => {
-                        const meta = getTagMeta(tag);
-                        const tc = meta?.color || "#555";
-                        return (
-                          <span key={tag} style={{ fontSize:9, padding:"1px 5px", borderRadius:10,
-                            background: tc + "22", border: `1px solid ${tc}44`, color: tc }}>
-                            {meta?.label || tag}
-                          </span>
-                        );
-                      })}
+                      {/* Condition badge */}
+                      {condAbbr && (
+                        <div style={{ position:"absolute", top:5, right:5,
+                          background: condColor + "cc", color:"#000",
+                          fontSize:8, fontWeight:800, padding:"2px 5px", borderRadius:5 }}>
+                          {condAbbr}
+                        </div>
+                      )}
+                      {/* Foil badge */}
+                      {item.foil && !item.condition && (
+                        <div style={{ position:"absolute", top:5, right:5,
+                          background:"rgba(0,0,0,0.8)", color:"#f59e0b",
+                          fontSize:8, fontWeight:800, padding:"2px 5px", borderRadius:5,
+                          border:"1px solid #f59e0b55" }}>
+                          FOIL
+                        </div>
+                      )}
+                      {/* Deck source badge */}
+                      {item._deckSource && (
+                        <div style={{ position:"absolute", top:5, left:5,
+                          background:"rgba(0,0,0,0.8)", color:TEAL,
+                          fontSize:7, fontWeight:700, padding:"2px 5px", borderRadius:5,
+                          border:`1px solid ${TEAL}44`, maxWidth:52,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {item._deckSource}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Info */}
+                    <div style={{ padding:"7px 8px 9px" }}>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:13,
+                        color:"#fff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {card?.name}
+                      </div>
+                      <div style={{ color:"#555", fontSize:9, marginTop:1,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {card?.set?.name}
+                      </div>
+                      {tags.length > 0 && (
+                        <div style={{ display:"flex", gap:3, marginTop:4, overflow:"hidden" }}>
+                          {tags.map(t => {
+                            const meta = getTagMeta(t);
+                            const tc = meta?.color || "#555";
+                            return (
+                              <span key={t} style={{ fontSize:8, padding:"2px 5px", borderRadius:5,
+                                background: tc + "22", border:`1px solid ${tc}44`, color: tc,
+                                whiteSpace:"nowrap", fontWeight:600 }}>
+                                {meta?.label || t}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:5 }}>
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:16,
+                          color: price > 0 ? TEAL : "#333", letterSpacing:0.5 }}>
+                          {price > 0 ? fmt(price) : (
+                            <span style={{ fontSize:9, color:"#444", fontFamily:"inherit",
+                              fontWeight:400, letterSpacing:0 }}>Unavailable</span>
+                          )}
+                        </div>
+                        <button onClick={e => { e.stopPropagation(); setAddingCard(item); }}
+                          style={{ background:"#1a1a1a", border:`1px solid ${BORDER}`,
+                            borderRadius:6, color:"#555", fontSize:8, cursor:"pointer",
+                            padding:"3px 6px", fontFamily:"inherit" }}>+ Deck</button>
+                      </div>
                     </div>
                   </div>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, flexShrink:0 }}>
-                    {price > 0 && (
-                      <div style={{ color:TEAL, fontSize:12, fontWeight:700 }}>${price.toFixed(2)}</div>
-                    )}
-                    <button onClick={e => { e.stopPropagation(); setAddingCard(item); }} style={{
-                      background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:8,
-                      color:"#888", fontSize:10, cursor:"pointer", padding:"4px 8px",
-                      fontFamily:"inherit", whiteSpace:"nowrap",
-                    }}>+ Deck</button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </>
         )}
       </div>
