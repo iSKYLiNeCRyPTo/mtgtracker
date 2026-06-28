@@ -1742,8 +1742,6 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
   const [showNew, setShowNew]         = useState(false);
   const [showImport, setShowImport]   = useState(false);
   const [mainTab, setMainTab]         = useState("decks"); // "decks" | "portfolio"
-  const importFileRef = useRef(null);
-
   useEffect(() => {
     if (pendingImportText) setShowImport(true);
   }, [pendingImportText]);
@@ -1844,26 +1842,6 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:"#fff", letterSpacing:1 }}>DECKS</div>
           <div style={{ display:"flex", gap:8 }}>
-            {mainTab === "decks" && (
-              <>
-                <button onClick={() => importFileRef.current?.click()} style={{
-                  background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:10,
-                  color:"#888", fontSize:12, cursor:"pointer", padding:"7px 12px", fontFamily:"inherit",
-                }}>Import</button>
-                <input ref={importFileRef} type="file" accept=".txt" style={{ display:"none" }}
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    file.text().then(text => {
-                      onClearPendingImport?.();
-                      // Store text temporarily via a synthetic flow — open modal directly
-                      importFileRef.current._pendingText = text;
-                      setShowImport(true);
-                    });
-                    e.target.value = "";
-                  }}/>
-              </>
-            )}
             <button onClick={() => setPlayingDeck({ format:"casual", name:"Quick Game" })} style={{
               background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:10,
               color:"#888", fontSize:12, cursor:"pointer", padding:"7px 12px", fontFamily:"inherit",
@@ -1920,17 +1898,13 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
               <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#333",
                 letterSpacing:1, marginBottom:8 }}>NO DECKS YET</div>
               <div style={{ color:"#444", fontSize:13, marginBottom:24, lineHeight:1.6 }}>
-                Build your first deck or import one from Archidekt.
+                Build your first deck or import one from Settings.
               </div>
               <div style={{ display:"flex", gap:10, justifyContent:"center" }}>
                 <button onClick={() => setShowNew(true)} style={{
                   background:TEAL, border:"none", borderRadius:12, color:"#000",
                   fontSize:14, fontWeight:700, cursor:"pointer", padding:"12px 24px", fontFamily:"inherit",
                 }}>Build a Deck</button>
-                <button onClick={() => importFileRef.current?.click()} style={{
-                  background:"#1a1a1a", border:`1px solid ${BORDER}`, borderRadius:12, color:"#888",
-                  fontSize:14, cursor:"pointer", padding:"12px 24px", fontFamily:"inherit",
-                }}>Import</button>
               </div>
             </div>
           ) : (
@@ -1960,11 +1934,10 @@ export default function DecksView({ collection, pendingImportText, onClearPendin
 
       {showImport && (
         <ImportModal
-          initialText={pendingImportText || importFileRef.current?._pendingText}
+          initialText={pendingImportText}
           onClose={() => {
             setShowImport(false);
             onClearPendingImport?.();
-            if (importFileRef.current) importFileRef.current._pendingText = null;
           }}
           onImported={importDeck}
         />
