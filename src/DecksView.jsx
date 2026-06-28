@@ -926,6 +926,27 @@ function PortfolioTab({ collection, decks, onAddToDeck, onCardPress }) {
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {card?.set?.name || "—"}
                       </div>
+                      {/* Tag chips */}
+                      {(() => {
+                        const tags = computeAutoTags(card).slice(0, 3);
+                        if (!tags.length) return null;
+                        return (
+                          <div style={{ display:"flex", gap:3, flexWrap:"wrap", marginTop:4 }}>
+                            {tags.map(tag => {
+                              const meta = getTagMeta(tag);
+                              return (
+                                <span key={tag} style={{
+                                  fontSize:8, padding:"2px 5px", borderRadius:4,
+                                  background:(meta?.color || "#555") + "22",
+                                  color: meta?.color || "#888",
+                                  border:`1px solid ${(meta?.color || "#555")}44`,
+                                  fontWeight:600, whiteSpace:"nowrap",
+                                }}>{meta?.label || tag}</span>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:5 }}>
                         <span style={{ color: price > 0 ? TEAL : "#333",
                           fontFamily:"'Bebas Neue',sans-serif", fontSize:15, letterSpacing:0.5 }}>
@@ -1761,13 +1782,15 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
 }
 
 // ── Main DecksView export ─────────────────────────────────────────────────────
-export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck, onCardPress }) {
+export default function DecksView({ collection, pendingImportText, onClearPendingImport, pendingDeck, onClearPendingDeck, onCardPress, mainTab: mainTabProp, onMainTabChange }) {
   const [decks, setDecks]             = useState(loadDecks);
   const [editingDeck, setEditingDeck] = useState(null);
   const [playingDeck, setPlayingDeck] = useState(null);
   const [showNew, setShowNew]         = useState(false);
   const [showImport, setShowImport]   = useState(false);
-  const [mainTab, setMainTab]         = useState("decks"); // "decks" | "portfolio"
+  const [mainTabLocal, setMainTabLocal] = useState(mainTabProp ?? "decks");
+  const mainTab = mainTabProp ?? mainTabLocal;
+  const setMainTab = (v) => { setMainTabLocal(v); onMainTabChange?.(v); };
   useEffect(() => {
     if (pendingImportText) setShowImport(true);
   }, [pendingImportText]);
