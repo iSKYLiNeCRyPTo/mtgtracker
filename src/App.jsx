@@ -4807,7 +4807,23 @@ function CardDetailView({ item, onBack, onRemove, onMarkSold, onUpdateCard, trad
 }
 
 // ── Search View ───────────────────────────────────────────────────────────────
-function SearchView({ onCardPress, onAdd }) {
+const SET_TYPE_LABEL = {
+  expansion:"Expansion", core:"Core Set", masters:"Masters",
+  commander:"Commander", commander_deck:"Commander", draft_innovation:"Draft",
+  from_the_vault:"From the Vault", premium_deck:"Premium Deck", duel_deck:"Duel Deck",
+  box:"Box Set", starter:"Starter", universes_beyond:"Universes Beyond",
+  alchemy:"Alchemy", planechase:"Planechase", archenemy:"Archenemy",
+  spellbook:"Spellbook", arsenal:"Arsenal", funny:"Un-Set",
+};
+const SET_TYPE_COLOR = {
+  expansion:TEAL, core:TEAL, draft_innovation:TEAL,
+  masters:"#f59e0b", from_the_vault:"#f59e0b", premium_deck:"#f59e0b", duel_deck:"#f59e0b",
+  commander:"#4ade80", commander_deck:"#4ade80", planechase:"#4ade80", archenemy:"#4ade80",
+  universes_beyond:"#a78bfa", funny:"#f472b6",
+  alchemy:"#60a5fa",
+};
+
+function SearchView({ onCardPress, onAdd, onBrowseSet }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -4818,8 +4834,32 @@ function SearchView({ onCardPress, onAdd }) {
   const [costPaid, setCostPaid] = useState("");
   const [cardsMeta, setCardsMeta] = useState(null);
   const [workerReady, setWorkerReady] = useState(false);
+  const [allSets, setAllSets] = useState([]);
+  const [setsLoading, setSetsLoading] = useState(true);
   const workerRef = useRef(null);
   const reqIdRef  = useRef(0);
+
+  // Load all sets for the browse grid
+  useEffect(() => {
+    const CACHE_KEY = "search_all_sets_v2";
+    try {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) { setAllSets(JSON.parse(cached)); setSetsLoading(false); return; }
+    } catch {}
+    scryfallFetch("/sets").then(data => {
+      if (!data?.data) return;
+      const EXCLUDE = new Set(["token","memorabilia","minigame","vanguard","treasure_chest","promo"]);
+      const sets = data.data
+        .filter(s => !s.digital && s.card_count >= 5 && !EXCLUDE.has(s.set_type))
+        .map(s => ({
+          id: s.code, name: s.name, symbol: s.icon_svg_uri,
+          releaseDate: s.released_at, total: s.card_count, series: s.set_type,
+        }))
+        .sort((a, b) => b.releaseDate.localeCompare(a.releaseDate));
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(sets)); } catch {}
+      setAllSets(sets);
+    }).catch(() => {}).finally(() => setSetsLoading(false));
+  }, []);
 
   // Spin up search worker once
   useEffect(() => {
@@ -4923,8 +4963,8 @@ function SearchView({ onCardPress, onAdd }) {
   };
 
   return (
-    <div style={{ display:"flex", flexDirection:"column" }}>
-      <div style={{ padding:"14px 20px 12px", borderBottom:`1px solid ${BORDER}` }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+      <div style={{ padding:"14px 20px 12px", borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
         <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#fff",
           letterSpacing:1, marginBottom:12 }}>SEARCH CARDS</div>
         <div style={{ position:"relative" }}>
@@ -4939,40 +4979,93 @@ function SearchView({ onCardPress, onAdd }) {
             style={{ width:"100%", padding:"11px 12px 11px 36px", background:CARD,
               border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
               fontSize:16, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+          {q && (
+            <button onClick={() => setQ("")} style={{ position:"absolute", right:10, top:"50%",
+              transform:"translateY(-50%)", background:"none", border:"none",
+              color:"#555", cursor:"pointer", fontSize:20, lineHeight:1, padding:"0 4px" }}>×</button>
+          )}
         </div>
       </div>
-      <div style={{ padding:"12px 16px" }}>
-        {loading && (
-          <div style={{ display:"flex", justifyContent:"center", padding:40 }}>
-            <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
-              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-          </div>
-        )}
-        {!loading && searched && results.length === 0 && (
-          <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No results found</div>
-        )}
-        {!loading && results.length > 0 && (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12 }}>
-            {results.map(card => (
-              <div key={card.id} onClick={() => setAddingCard(card)}
-                style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
-                  overflow:"hidden", cursor:"pointer", transition:"border-color 0.15s" }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = TEAL+"44"}
-                onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
-                <div style={{ background:"#0d0d0d", display:"flex", justifyContent:"center", padding:8 }}>
-                  <img src={card.images?.small} alt={card.name}
-                    style={{ height:100, objectFit:"contain" }}/>
-                </div>
-                <div style={{ padding:"8px 10px 10px" }}>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:14, color:"#fff" }}>{card.name}</div>
-                  <div style={{ color:"#555", fontSize:10, marginTop:2 }}>{card.set?.name}</div>
-                  <div style={{ color:TEAL, fontSize:11, marginTop:4, fontFamily:"'Bebas Neue',sans-serif" }}>
-                    + ADD
-                  </div>
-                </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"12px 16px", minHeight:0, WebkitOverflowScrolling:"touch" }}>
+        {/* Sets browser — shown when no query is active */}
+        {!q.trim() && (
+          setsLoading ? (
+            <div style={{ display:"flex", justifyContent:"center", padding:48 }}>
+              <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+                borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+            </div>
+          ) : (
+            <>
+              <div style={{ color:"#555", fontSize:11, letterSpacing:0.5, marginBottom:12 }}>
+                {allSets.length} SETS · CLICK TO BROWSE CARDS
               </div>
-            ))}
-          </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:10 }}>
+                {allSets.map(set => {
+                  const color = SET_TYPE_COLOR[set.series] || "#555";
+                  const label = SET_TYPE_LABEL[set.series] || set.series;
+                  return (
+                    <div key={set.id} onClick={() => onBrowseSet && onBrowseSet(set)}
+                      style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12,
+                        padding:"12px 14px", cursor:"pointer", transition:"border-color 0.15s" }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = color + "66"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                        {set.symbol && (
+                          <img src={set.symbol} alt=""
+                            style={{ width:20, height:20, filter:"invert(1) sepia(1) saturate(0) brightness(0.6)", flexShrink:0 }}/>
+                        )}
+                        <span style={{ background:color+"22", color:color, fontSize:9, fontWeight:700,
+                          padding:"2px 6px", borderRadius:4, letterSpacing:0.5, textTransform:"uppercase" }}>
+                          {label}
+                        </span>
+                      </div>
+                      <div style={{ color:"#fff", fontSize:12, fontWeight:600, lineHeight:1.3, marginBottom:4 }}>{set.name}</div>
+                      <div style={{ color:"#555", fontSize:10 }}>{set.total} cards · {set.releaseDate?.slice(0,4)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )
+        )}
+
+        {/* Search results — shown when a query is active */}
+        {q.trim() && (
+          <>
+            {loading && (
+              <div style={{ display:"flex", justifyContent:"center", padding:40 }}>
+                <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+                  borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+              </div>
+            )}
+            {!loading && searched && results.length === 0 && (
+              <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No results found</div>
+            )}
+            {!loading && results.length > 0 && (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12 }}>
+                {results.map(card => (
+                  <div key={card.id} onClick={() => onCardPress && onCardPress(card)}
+                    style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+                      overflow:"hidden", cursor:"pointer", transition:"border-color 0.15s" }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = TEAL+"44"}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
+                    <div style={{ background:"#0d0d0d", display:"flex", justifyContent:"center", padding:8 }}>
+                      <img src={card.images?.small} alt={card.name}
+                        style={{ height:100, objectFit:"contain" }}/>
+                    </div>
+                    <div style={{ padding:"8px 10px 10px" }}>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:14, color:"#fff" }}>{card.name}</div>
+                      <div style={{ color:"#555", fontSize:10, marginTop:2 }}>{card.set?.name}</div>
+                      <div style={{ color:TEAL, fontSize:11, marginTop:4, fontFamily:"'Bebas Neue',sans-serif" }}>
+                        VIEW CARD
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -9339,8 +9432,8 @@ function App() {
     setImporting(false); setTab("collection");
   };
   const handleSearchCardPress = (card) => {
-    const existing = collection.find(i=>i.card.id===card.id);
-    setDetail(existing || { id:"__preview__", card, condition:"near_mint", preview:true });
+    setBrowseCard(card);
+    setBrowseSet(null);
   };
 
   if (!loaded) return (
@@ -9565,6 +9658,21 @@ function App() {
                   setDetail(updatedItem);
                 }}
               />
+            ) : tab==="search" ? (
+              /* Keep SearchView mounted beneath overlays so scroll/query state is preserved */
+              <div style={{ position:"relative", height:"100%", overflow:"hidden" }}>
+                <SearchView collection={collection} onCardPress={handleSearchCardPress} onAdd={addCard} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }}/>
+                {browseSet && !browseCard && (
+                  <div style={{ position:"absolute", inset:0, background:"#0a0a0a", zIndex:10, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+                    <SetBrowseView setInfo={browseSet} onBack={() => setBrowseSet(null)} onCardPress={card => setBrowseCard(card)}/>
+                  </div>
+                )}
+                {browseCard && (
+                  <div style={{ position:"absolute", inset:0, background:"#0a0a0a", zIndex:20, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+                    <CardBrowseDetailView card={browseCard} onBack={() => setBrowseCard(null)} onAdd={addCard}/>
+                  </div>
+                )}
+              </div>
             ) : browseCard ? (
               <CardBrowseDetailView
                 card={browseCard}
@@ -9600,8 +9708,6 @@ function App() {
                   <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
                 </div>
               </div>
-            ) : tab==="search" ? (
-              <SearchView collection={collection} onCardPress={handleSearchCardPress} onAdd={addCard}/>
             ) : tab==="decks" ? (
               <DecksView collection={collection}/>
             ) : tab==="collection" ? (
