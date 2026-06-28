@@ -4675,6 +4675,112 @@ function AddUserTagButton({ existingTags, onAdd }) {
   );
 }
 
+// ── Similar card suggestions ──────────────────────────────────────────────────
+function buildSimilarQuery(card) {
+  const oracle = (card.oracle_text || "").toLowerCase();
+  const mechanics = [];
+  const labels    = [];
+
+  if (/\+1\/\+1 counter/i.test(oracle))                        { mechanics.push('o:"+1/+1 counter"'); labels.push("+1/+1"); }
+  if (/-1\/-1 counter/i.test(oracle))                           { mechanics.push('o:"-1/-1 counter"'); labels.push("-1/-1"); }
+  if (/draw (?:a|x|\d+) card/i.test(oracle))                   { mechanics.push('o:"draw a card"');   labels.push("Draw"); }
+  if (/counter target spell/i.test(oracle))                     { mechanics.push('o:"counter target spell"'); labels.push("Counter"); }
+  if (/search your library/i.test(oracle))                      { mechanics.push('o:"search your library"'); labels.push("Tutor"); }
+  if (/\bcreate\b.{1,25}token/i.test(oracle))                  { mechanics.push('o:"create" o:"token"'); labels.push("Token"); }
+  if (/destroy target creature/i.test(oracle))                  { mechanics.push('o:"destroy target creature"'); labels.push("Removal"); }
+  if (/\bproliferate\b/i.test(oracle))                          { mechanics.push('o:"proliferate"');  labels.push("Proliferate"); }
+  if (/\bscry\b/i.test(oracle))                                 { mechanics.push('o:"scry"');          labels.push("Scry"); }
+  if (/from .{1,20}graveyard .{1,30}battlefield/i.test(oracle)) { mechanics.push('o:"graveyard" o:"battlefield"'); labels.push("Reanimate"); }
+  if (/\bsacrifice\b/i.test(oracle))                            { mechanics.push('o:"sacrifice"');    labels.push("Sacrifice"); }
+  if (/gain \d+ life|gain x life/i.test(oracle))                { mechanics.push('o:"gain" o:"life"'); labels.push("Lifegain"); }
+  if (/deals? \d+ damage|deals? x damage/i.test(oracle))        { mechanics.push('o:"damage"');        labels.push("Burn"); }
+  if (/\bflashback\b/i.test(oracle))                            { mechanics.push('o:"flashback"');    labels.push("Flashback"); }
+  if (/take an extra turn/i.test(oracle))                       { mechanics.push('o:"extra turn"');   labels.push("Extra Turn"); }
+
+  if (mechanics.length === 0) {
+    const mainType = (card.type_line || "").split("—")[0].trim()
+      .split(" ").find(t => ["Creature","Instant","Sorcery","Enchantment","Artifact","Planeswalker"].includes(t));
+    if (!mainType) return null;
+    return { query: `t:${mainType.toLowerCase()} game:paper`, label: mainType };
+  }
+
+  const picked = mechanics.slice(0, 2);
+  return { query: `${picked.join(" ")} game:paper`, label: labels.slice(0, 2).join(" + ") };
+}
+
+function SimilarCardsSection({ card }) {
+  const [cards, setCards]     = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [label, setLabel]     = useState("");
+
+  useEffect(() => {
+    const result = buildSimilarQuery(card);
+    if (!result) return;
+    setLabel(result.label);
+    setLoading(true);
+    setCards([]);
+    scryfallFetch(`/cards/search?q=${encodeURIComponent(result.query)}&order=edhrec`)
+      .then(data => {
+        if (data?.data) {
+          setCards(
+            data.data.map(normalizeScryfallCard).filter(c => c.id !== card.id).slice(0, 10)
+          );
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [card.id]);
+
+  if (!loading && cards.length === 0) return null;
+
+  return (
+    <div style={{ margin:"20px 0 0" }}>
+      <div style={{ padding:"0 20px 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <span style={{ color:"#555", fontSize:11, letterSpacing:0.5 }}>SIMILAR CARDS</span>
+        {label && <span style={{ color:"#333", fontSize:10 }}>{label}</span>}
+      </div>
+      <div style={{ display:"flex", gap:10, overflowX:"auto", padding:"0 20px 4px",
+        scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
+        {loading ? [1,2,3,4,5].map(i => (
+          <div key={i} style={{ flexShrink:0, width:88, height:123, background:CARD,
+            borderRadius:8, border:`1px solid ${BORDER}`, opacity:0.4 }}/>
+        )) : cards.map(c => {
+          const price = parseFloat(c.prices?.usd || c.prices?.usd_foil || 0);
+          const img   = c.images?.normal || c.images?.small;
+          return (
+            <div key={c.id} style={{ flexShrink:0, width:88 }}>
+              {img ? (
+                <img src={img} alt={c.name} style={{
+                  width:88, height:123, objectFit:"cover", borderRadius:8,
+                  border:`1px solid ${BORDER}`, display:"block",
+                }}/>
+              ) : (
+                <div style={{ width:88, height:123, background:CARD, borderRadius:8,
+                  border:`1px solid ${BORDER}`, display:"flex", alignItems:"center",
+                  justifyContent:"center", padding:4, boxSizing:"border-box" }}>
+                  <span style={{ color:"#333", fontSize:9, textAlign:"center" }}>{c.name}</span>
+                </div>
+              )}
+              <div style={{ marginTop:5 }}>
+                <div style={{ color:"#aaa", fontSize:10, lineHeight:1.3,
+                  overflow:"hidden", display:"-webkit-box",
+                  WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{c.name}</div>
+                <div style={{ color:"#444", fontSize:9, marginTop:1 }}>{c.set?.name}</div>
+                {price > 0 && (
+                  <div style={{ color:TEAL, fontSize:10,
+                    fontFamily:"'Bebas Neue',sans-serif", letterSpacing:0.5, marginTop:1 }}>
+                    ${price.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CardDetailView({ item, onBack, onRemove, onMarkSold, onUpdateCard, tradeList=[], onToggleTrade, boxes=[], collection=[] }) {
   const [tab, setTab]               = useState("raw");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -5207,6 +5313,8 @@ function CardDetailView({ item, onBack, onRemove, onMarkSold, onUpdateCard, trad
           </div>
         )}
       </div>
+
+      <SimilarCardsSection card={card} />
 
       <div style={{ height:32 }}/>
 
