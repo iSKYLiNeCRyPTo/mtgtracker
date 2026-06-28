@@ -3998,6 +3998,21 @@ function mergeHistory(pcHistory, localSnapshots) {
 
 
 
+// Converts daily { date, price } snapshots to chart points filtered by range
+function snapshotsToChartData(snapshots, range) {
+  if (!snapshots?.length) return [];
+  const counts = { "1D":1, "7D":7, "1M":30, "3M":90, "6M":180, "MAX":9999 };
+  const days = counts[range] ?? 30;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const filtered = days >= 9999
+    ? snapshots
+    : snapshots.filter(s => s.date >= cutoffStr);
+  const source = filtered.length ? filtered : snapshots.slice(-1);
+  return source.map(s => ({ label: s.date, price: s.price }));
+}
+
 // ── Chart range filter (works with both daily snapshots and monthly estimates) ─
 function getChartData(history, range) {
   if (!history || !history.length) return [];
