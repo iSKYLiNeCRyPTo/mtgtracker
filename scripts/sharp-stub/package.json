@@ -1,6 +1,0 @@
-{
-  "name": "sharp-stub",
-  "version": "99.0.0",
-  "description": "No-op stub — sharp is not used in browser/Cloudflare builds",
-  "main": "index.js"
-}
