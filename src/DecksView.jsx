@@ -471,7 +471,7 @@ async function scryfallBatchLookup(entries, onProgress) {
         }
       }
     } catch { /* will retry by name */ }
-    onProgress?.(Math.round((i + CHUNK) / entries.length * 60), 100);
+    onProgress?.(Math.round((i + CHUNK) / entries.length * 55), 100);
     if (i + CHUNK < entries.length) await new Promise(r => setTimeout(r, 150));
   }
 
@@ -496,9 +496,30 @@ async function scryfallBatchLookup(entries, onProgress) {
             if (card) resultMap.set(entry.name, card);
           }
         }
-      } catch { /* card stays missing */ }
-      onProgress?.(60 + Math.round((i + CHUNK) / missing.length * 40), 100);
+      } catch { /* will retry with fuzzy */ }
+      onProgress?.(55 + Math.round((i + CHUNK) / missing.length * 25), 100);
       if (i + CHUNK < missing.length) await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  // Pass 3: fuzzy name search via /cards/named?fuzzy= for anything still missing
+  const stillMissing = entries.filter(e => !resultMap.has(e.name));
+  if (stillMissing.length > 0) {
+    for (let i = 0; i < stillMissing.length; i++) {
+      const entry = stillMissing[i];
+      const searchName = entry.name.split(" // ")[0];
+      try {
+        const res = await fetch(
+          `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(searchName)}`,
+          { headers: { "User-Agent": "MTGTracker/1.0" } }
+        );
+        if (res.ok) {
+          const card = await res.json();
+          if (card.object === "card") resultMap.set(entry.name, card);
+        }
+      } catch { /* card stays missing */ }
+      onProgress?.(80 + Math.round((i + 1) / stillMissing.length * 20), 100);
+      if (i + 1 < stillMissing.length) await new Promise(r => setTimeout(r, 100));
     }
   }
 
@@ -676,7 +697,7 @@ function ImportModal({ initialText, onClose, onImported }) {
               FETCHING CARD DATA
             </div>
             <div style={{ color:"#555", fontSize:13, marginBottom:20 }}>
-              {progress[0] <= 60 ? "Looking up by set & number…" : "Resolving remaining cards by name…"}
+              {progress[0] <= 55 ? "Looking up by set & number…" : progress[0] <= 80 ? "Resolving remaining cards by name…" : "Fuzzy search for remaining cards…"}
             </div>
             <div style={{ height:6, background:"#1a1a1a", borderRadius:3, overflow:"hidden" }}>
               <div style={{
@@ -717,7 +738,12 @@ function ImportModal({ initialText, onClose, onImported }) {
             {foundCount < totalEntries && (
               <div style={{ background:"#1a0a00", border:"1px solid #f59e0b44", borderRadius:10,
                 padding:"10px 14px", marginBottom:16, color:"#f59e0b", fontSize:12, lineHeight:1.5 }}>
-                {totalEntries - foundCount} card{totalEntries - foundCount !== 1 ? "s" : ""} could not be found on Scryfall and will be skipped.
+                <div>{totalEntries - foundCount} card{totalEntries - foundCount !== 1 ? "s" : ""} could not be found on Scryfall and will be skipped:</div>
+                <div style={{ marginTop:6, display:"flex", flexDirection:"column", gap:2 }}>
+                  {results.filter(r => !r.card).map(r => (
+                    <div key={r.entry.name} style={{ color:"#f59e0b88", fontSize:11 }}>{r.entry.name}</div>
+                  ))}
+                </div>
               </div>
             )}
 
