@@ -397,19 +397,20 @@ function CommanderDeckImportSession({ box, onDone, onCancel }) {
   const TEAL = "#00D4AA";
   const BORDER = "#1e1e1e";
 
-  // On mount: fetch MTGJSON deck list and filter to this set
+  // On mount: if a deck was pre-selected (from NewBoxForm), fetch it directly.
+  // Otherwise load the MTGJSON deck list filtered to this set.
   React.useEffect(() => {
+    const autoSelectDeck = box._autoSelectPrecon;
+    if (autoSelectDeck) {
+      selectPrecon(autoSelectDeck);
+      return;
+    }
     fetch("https://mtgjson.com/api/v5/DeckList.json")
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(json => {
         const all = json.data || [];
         const codeUp = (box.setId || "").toUpperCase();
-        const nameWords = (box.setName || "").toLowerCase().split(/\s+/).filter(w => w.length > 3).slice(0, 3);
-        const matches = all.filter(d => {
-          if (d.code?.toUpperCase() === codeUp) return true;
-          const dn = (d.name || "").toLowerCase();
-          return nameWords.some(w => dn.includes(w));
-        });
+        const matches = all.filter(d => d.code?.toUpperCase() === codeUp);
         setPreconList(matches.length ? matches : all);
       })
       .catch(() => {
@@ -2075,6 +2076,9 @@ function NewBoxForm({ onSave, onCancel }) {
   const [scanning,   setScanning]   = useState(false);
   const [scanErr,    setScanErr]    = useState("");
   const [scannedProduct, setScannedProduct] = useState(null); // matched UPC result
+  const [selectedPrecon, setSelectedPrecon] = useState(null); // for commander_deck
+  const [preconOptions, setPreconOptions]   = useState(null); // null=not loaded, []=loaded
+  const [preconLoading, setPreconLoading]   = useState(false);
   const barcodeVideoRef = useRef(null);
   const barcodeStreamRef = useRef(null);
   const barcodeLoopRef  = useRef(null);
@@ -2215,8 +2219,10 @@ function NewBoxForm({ onSave, onCancel }) {
       s.id === product.setId ||
       s.name.toLowerCase() === product.setName.toLowerCase()
     );
-    setSelectedSet(matched || { name: product.setName, id: product.setId });
+    const set = matched || { name: product.setName, id: product.setId };
+    setSelectedSet(set);
     setStep("details");
+    if (pt.id === "commander_deck") loadPreconOptions(set.id);
   };
 
   // Fetch sets when moving to set picker
@@ -2230,9 +2236,25 @@ function NewBoxForm({ onSave, onCancel }) {
     setSetsLoading(false);
   };
 
+  const loadPreconOptions = async (setCode) => {
+    if (!setCode) { setPreconOptions([]); return; }
+    setPreconLoading(true); setPreconOptions(null); setSelectedPrecon(null);
+    try {
+      const res = await fetch("https://mtgjson.com/api/v5/DeckList.json");
+      const json = res.ok ? await res.json() : { data: [] };
+      const codeUp = setCode.toUpperCase();
+      const matches = (json.data || []).filter(d => d.code?.toUpperCase() === codeUp);
+      setPreconOptions(matches);
+    } catch { setPreconOptions([]); }
+    setPreconLoading(false);
+  };
+
   const selectSet = (s) => {
     setSelectedSet(s);
     setStep("details");
+    if (productType?.id === "commander_deck") {
+      loadPreconOptions(s.id);
+    }
   };
 
   const save = () => {
@@ -2247,11 +2269,12 @@ function NewBoxForm({ onSave, onCancel }) {
                    selectedSet.imageUrl ||
                    (selectedSet._groupId ? `https://tcgplayer-cdn.tcgplayer.com/product/${selectedSet._groupId}_200w.jpg` : null),
       setSymbol:   selectedSet.images?.symbol || null,
-      pricePaid:   price,  // total paid, split by totalPacks when needed
+      pricePaid:   price,
       totalPacks,
       cardsPerPack: productType.cardsPerPack,
       purchasedAt: Date.now(),
       packs:       [],
+      ...(selectedPrecon ? { _autoSelectPrecon: selectedPrecon } : {}),
     });
   };
 
@@ -2505,19 +2528,61 @@ function NewBoxForm({ onSave, onCancel }) {
             </div>
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+          {/* Commander deck precon picker */}
+          {productType?.id === "commander_deck" && (
+            <div style={{ marginBottom:20 }}>
+              <div style={{ color:"#888", fontSize:11, letterSpacing:0.5, marginBottom:10 }}>SELECT DECK</div>
+              {preconLoading && (
+                <div style={{ display:"flex", alignItems:"center", gap:10, color:"#555", fontSize:13, padding:"16px 0" }}>
+                  <div style={{ width:16, height:16, border:`2px solid ${TEAL}`, borderTopColor:"transparent",
+                    borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
+                  Loading decks…
+                </div>
+              )}
+              {!preconLoading && preconOptions !== null && preconOptions.length === 0 && (
+                <div style={{ color:"#555", fontSize:12, padding:"8px 0 12px" }}>
+                  No deck list found — you can add cards after tracking starts.
+                </div>
+              )}
+              {!preconLoading && (preconOptions || []).map(deck => {
+                const isSelected = selectedPrecon?.fileName === deck.fileName;
+                return (
+                  <button key={deck.fileName}
+                    onClick={() => setSelectedPrecon(isSelected ? null : deck)}
+                    style={{ width:"100%", display:"flex", alignItems:"center", gap:12,
+                      background: isSelected ? TEAL+"18" : CARD,
+                      border: `1px solid ${isSelected ? TEAL+"66" : BORDER}`,
+                      borderRadius:12, padding:"12px 14px", marginBottom:6,
+                      cursor:"pointer", textAlign:"left", fontFamily:"inherit" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ color: isSelected ? TEAL : "#fff", fontSize:13, fontWeight:600 }}>{deck.name}</div>
+                      <div style={{ color:"#555", fontSize:11, marginTop:2 }}>{deck.type} · {deck.releaseDate}</div>
+                    </div>
+                    {isSelected && (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={TEAL} strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display:"grid", gridTemplateColumns: productType?.id === "commander_deck" ? "1fr" : "1fr 1fr", gap:12, marginBottom:14 }}>
             <div>
               <div style={{ color:"#888", fontSize:11, letterSpacing:0.5 }}>TOTAL PRICE PAID</div>
               <input type="number" inputMode="decimal" value={pricePaid} autoFocus
                 onChange={e=>setPricePaid(e.target.value)} placeholder="0.00" style={inputStyle}/>
               <div style={{ color:"#444", fontSize:10, marginTop:4 }}>What you paid in total</div>
             </div>
-            <div>
-              <div style={{ color:"#888", fontSize:11, letterSpacing:0.5 }}>QUANTITY</div>
-              <input type="number" inputMode="numeric" value={totalPacks}
-                onChange={e=>setTotalPacks(Math.max(1,parseInt(e.target.value)||1))} style={inputStyle}/>
-              <div style={{ color:"#444", fontSize:10, marginTop:4 }}>How many packs</div>
-            </div>
+            {productType?.id !== "commander_deck" && (
+              <div>
+                <div style={{ color:"#888", fontSize:11, letterSpacing:0.5 }}>QUANTITY</div>
+                <input type="number" inputMode="numeric" value={totalPacks}
+                  onChange={e=>setTotalPacks(Math.max(1,parseInt(e.target.value)||1))} style={inputStyle}/>
+                <div style={{ color:"#444", fontSize:10, marginTop:4 }}>How many packs</div>
+              </div>
+            )}
           </div>
 
           {pricePaid && !isNaN(parseFloat(pricePaid)) && parseFloat(pricePaid) > 0 && (
@@ -2549,7 +2614,9 @@ function NewBoxForm({ onSave, onCancel }) {
               color: pricePaid && !isNaN(parseFloat(pricePaid)) && parseFloat(pricePaid)>0 ? "#000" : "#444",
               cursor:"pointer", marginBottom:32,
             }}>
-            START TRACKING
+            {productType?.id === "commander_deck" && selectedPrecon
+              ? `ADD "${selectedPrecon.name.toUpperCase()}"`
+              : "START TRACKING"}
           </button>
         </div>
       )}
@@ -9898,11 +9965,17 @@ function App() {
 
   // ── Box / Pack handlers ───────────────────────────────────────────────────
   const saveBox = async (box) => {
-    const next = [...boxes, box];
+    const { _autoSelectPrecon, ...boxData } = box;
+    const next = [...boxes, boxData];
     setBoxes(next); saveBoxes(next);
     setNewBoxOpen(false);
-    setActiveBox(box);
-    setTab("packs");
+    if (_autoSelectPrecon) {
+      // Skip the box view — go straight to importing the selected deck
+      setOpeningPackForBox({ ...boxData, _autoSelectPrecon });
+    } else {
+      setActiveBox(boxData);
+      setTab("packs");
+    }
   };
 
   const fbSaveBoxes = (next) => {
