@@ -7127,7 +7127,7 @@ function CollectionView({ collection, onCardPress, onImport, onRefreshPrices, re
           });
           const groups = Array.from(groupMap.values());
           return (
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:10 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(160px, 1fr))", gap:10 }}>
               {groups.map(({ item, count }) => {
                 const p = genPrices(item.card);
                 const val = p.raw[item.condition] || 0;
