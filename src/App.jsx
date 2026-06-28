@@ -2085,15 +2085,23 @@ function NewBoxForm({ onSave, onCancel }) {
       {step === "details" && (
         <div style={{ flex:1, overflowY:"auto", padding:"20px 20px 0" }}>
           {/* Set card */}
-          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:"16px", marginBottom:20 }}>
-            {selectedSet?.images?.logo && (
-              <img src={selectedSet.images.logo} alt={selectedSet?.name}
-                style={{ height:40, maxWidth:200, objectFit:"contain", display:"block", marginBottom:10 }}
-                onError={e=>{ e.target.style.display="none"; }}
-              />
-            )}
-            <div style={{ color:"#fff", fontSize:15, fontWeight:600 }}>{selectedSet?.name}</div>
-            <div style={{ color:"#555", fontSize:12, marginTop:2 }}>{selectedSet?.releaseDate}{selectedSet?.total > 0 ? ` · ${selectedSet.total} cards` : ""}</div>
+          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:"16px", marginBottom:20, display:"flex", alignItems:"center", gap:12 }}>
+            <div style={{ width:52, height:36, flexShrink:0, display:"flex", alignItems:"center",
+              justifyContent:"center", background:"#0d0d0d", borderRadius:8, overflow:"hidden" }}>
+              {selectedSet?.images?.logo
+                ? <img src={selectedSet.images.logo} alt={selectedSet?.name}
+                    style={{ maxHeight:28, maxWidth:44, objectFit:"contain", filter:"brightness(0) invert(0.7)" }}
+                    onError={e=>{ e.target.style.display="none"; }}
+                  />
+                : <span style={{ color:"#444", fontSize:9, fontWeight:700, letterSpacing:0.5 }}>
+                    {(selectedSet?.id || "").slice(0,4).toUpperCase()}
+                  </span>
+              }
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ color:"#fff", fontSize:15, fontWeight:600 }}>{selectedSet?.name}</div>
+              <div style={{ color:"#555", fontSize:12, marginTop:2 }}>{selectedSet?.releaseDate}{selectedSet?.total > 0 ? ` · ${selectedSet.total} cards` : ""}</div>
+            </div>
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
@@ -4270,11 +4278,17 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
 
   // Fetch recent sets from Scryfall, then fetch one card art per set
   useEffect(() => {
-    const cached = sessionStorage.getItem("home_sets_mtg_v2");
+    const cached = sessionStorage.getItem("home_sets_mtg_v3");
     if (cached) { try { setNewSets(JSON.parse(cached)); return; } catch(_e) {} }
     scryfallFetch("/sets?order=released&direction=desc").then(async data => {
+      const seenNames = new Set();
       const raw = (data?.data || [])
-        .filter(s => !s.digital && s.card_count >= 10 && s.released_at && !["token","memorabilia"].includes(s.set_type))
+        .filter(s => {
+          if (s.digital || s.card_count < 10 || !s.released_at || ["token","memorabilia"].includes(s.set_type)) return false;
+          if (seenNames.has(s.name)) return false;
+          seenNames.add(s.name);
+          return true;
+        })
         .slice(0, 6)
         .map(s => ({ id:s.code, name:s.name, symbol:s.icon_svg_uri,
           releaseDate:s.released_at, total:s.card_count, series:s.set_type }));
@@ -4287,7 +4301,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
         } catch { return s; }
       }));
       setNewSets(sets);
-      sessionStorage.setItem("home_sets_mtg_v2", JSON.stringify(sets));
+      sessionStorage.setItem("home_sets_mtg_v3", JSON.stringify(sets));
     }).catch(() => {});
   }, []);
 
@@ -9775,7 +9789,7 @@ function App() {
               flexShrink:0,
               background:'#0d0d0d',
               borderTop:'1px solid #1e1e1e',
-              paddingBottom: bottomInset,
+              paddingBottom: "env(safe-area-inset-bottom, 0px)",
             }}>
               <div style={{ display:'flex', height:60 }}>
               {tabs.map(t => {
