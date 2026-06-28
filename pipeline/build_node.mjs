@@ -183,7 +183,7 @@ const ANSI = {
 };
 
 function bar(fraction, width = 40) {
-  const filled = Math.round(fraction * width);
+  const filled = Math.max(0, Math.min(width, Math.round(fraction * width)));
   const empty  = width - filled;
   return `${ANSI.teal}${"█".repeat(filled)}${ANSI.grey}${"░".repeat(empty)}${ANSI.reset}`;
 }
