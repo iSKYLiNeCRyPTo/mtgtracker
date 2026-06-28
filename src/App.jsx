@@ -1879,7 +1879,7 @@ function NewBoxForm({ onSave, onCancel }) {
   return (
     <div style={{ position:"fixed", inset:0, background:BG, zIndex:10000, display:"flex", flexDirection:"column" }}>
       {/* Header */}
-      <div className="fixed-overlay-header" style={{ display:"flex", alignItems:"center", padding:"14px 20px", gap:14, borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
+      <div className="fixed-overlay-header" style={{ display:"flex", alignItems:"center", padding:"14px 20px", paddingTop:"calc(14px + env(safe-area-inset-top, 0px))", gap:14, borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
         <button onClick={step==="product" ? onCancel : ()=>setStep(step==="set"?"product":"set")}
           style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
           {step==="product" ? <Icon.Close size={20} color="#fff"/> : <Icon.Back size={22} color="#fff"/>}
@@ -2033,7 +2033,7 @@ function NewBoxForm({ onSave, onCancel }) {
             </div>
           </div>
 
-          <div style={{ flex:1, overflowY:"auto", padding:"0 20px 20px" }}>
+          <div style={{ flex:1, overflowY:"auto", padding:"0 20px 20px", minHeight:0, WebkitOverflowScrolling:"touch", overscrollBehavior:"contain" }}>
             {setsLoading ? (
               <div style={{ display:"flex", justifyContent:"center", padding:48 }}>
                 <div style={{ width:32, height:32, border:`2.5px solid ${TEAL}`, borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
@@ -8781,7 +8781,7 @@ function ScanFlow({ onDone, onClose, collection = [], setFilter = null, setCards
   return (
     <div style={{ position:"fixed", inset:0, background:BG, zIndex:10000, display:"flex", flexDirection:"column" }}>
       <div className="fixed-overlay-header" style={{ display:"flex", alignItems:"center",
-        justifyContent:"space-between", padding:"14px 20px", gap:14, borderBottom:`1px solid ${BORDER}` }}>
+        justifyContent:"space-between", padding:"14px 20px", paddingTop:"calc(14px + env(safe-area-inset-top, 0px))", gap:14, borderBottom:`1px solid ${BORDER}` }}>
         <div style={{ display:"flex", alignItems:"center", gap:14 }}>
           <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", padding:4 }}>
             <Icon.Close size={20} color="#fff"/>
