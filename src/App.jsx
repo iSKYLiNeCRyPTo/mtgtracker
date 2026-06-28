@@ -5331,7 +5331,11 @@ function SearchView({ onCardPress, onAdd }) {
           sid: (c.set?.id    || "").toLowerCase(),
           r:   (c.rarity     || "").toLowerCase(),
         }));
-        workerRef.current?.postMessage({ type: 'index', items });
+        // Only send index if we have cards — an empty index makes the worker
+        // "ready" with 0 results, which bypasses the API search fallback.
+        if (items.length > 0) {
+          workerRef.current?.postMessage({ type: 'index', items });
+        }
       };
       req.onerror = () => setCardsMeta({});
     };
@@ -5419,7 +5423,7 @@ function SearchView({ onCardPress, onAdd }) {
           </div>
         )}
         {!loading && searched && results.length === 0 && (
-          <div style={{ textAlign:"center", color:"#444", padding:40, fontSize:14 }}>No results found</div>
+          <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No results found</div>
         )}
         {!loading && results.length > 0 && (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12 }}>
