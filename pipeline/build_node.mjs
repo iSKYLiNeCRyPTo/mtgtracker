@@ -56,8 +56,9 @@ const API_KEY = "AIzaSyAHDm094sclBfRMtmjsXyC4jsKzrF9kXTs";
 
 // ── Concurrency ───────────────────────────────────────────────────────────────
 const args       = process.argv.slice(2);
-const RESUME      = args.includes("--resume");
-const UPLOAD_ONLY = args.includes("--upload-only");
+const RESUME        = args.includes("--resume");
+const UPLOAD_ONLY   = args.includes("--upload-only");
+const PACK_UPLOAD   = args.includes("--pack-and-upload");
 const workerArg   = args.indexOf("--workers");
 // Default: use (CPU cores - 1), minimum 1, maximum 8
 // DINOv2 is memory-hungry; more than 6 workers rarely helps on CPU
@@ -468,6 +469,63 @@ async function main() {
       metaPath: "embeddings/cards-meta.json",
       updatedAt: version,
     });
+    return;
+  }
+
+  if (PACK_UPLOAD) {
+    console.log("\n  Pack-and-upload mode (from checkpoint)...");
+    if (!existsSync(CHECKPOINT)) {
+      console.error("  No checkpoint file found at", CHECKPOINT); process.exit(1);
+    }
+    const done = JSON.parse(readFileSync(CHECKPOINT, "utf-8"));
+    const cardCount = Object.keys(done).length;
+    console.log(`  Checkpoint has ${cardCount.toLocaleString()} cards`);
+
+    // Pack binary index
+    console.log("  Packing binary index...");
+    const embeddings = [];
+    for (const [id, vecs] of Object.entries(done)) {
+      for (const vec of vecs) embeddings.push({ id, vec });
+    }
+    const packed = packIndex(embeddings);
+    writeFileSync(INDEX_FILE, packed);
+    console.log(`  ✓ ${embeddings.length.toLocaleString()} entries packed (${(packed.length/1024/1024).toFixed(1)} MB)`);
+
+    // Build metadata from cards cache
+    if (!existsSync(CARDS_CACHE)) {
+      console.error("  No cards cache found at", CARDS_CACHE, "— run without flags first to download it"); process.exit(1);
+    }
+    console.log("  Building card metadata...");
+    const allCards = JSON.parse(readFileSync(CARDS_CACHE, "utf-8"));
+    const byId = Object.fromEntries(allCards.map(c => [c.id, c]));
+    const meta = {};
+    for (const id of Object.keys(done)) {
+      const c = byId[id];
+      if (c) meta[id] = {
+        id, name: c.name || "", set: c.set || "", set_name: c.set_name || "",
+        number: c.collector_number || "", rarity: c.rarity || "",
+        type_line: c.type_line || "",
+        image_uris: { small: c.image_uris?.small || "", normal: c.image_uris?.normal || "" },
+        prices: c.prices || {},
+      };
+    }
+    writeFileSync(META_FILE, JSON.stringify(meta));
+    console.log(`  ✓ Metadata for ${Object.keys(meta).length.toLocaleString()} cards`);
+
+    // Upload
+    console.log("\n  Uploading to Firebase Storage...");
+    await uploadStorage(INDEX_FILE, "embeddings/global-v1.bin", "application/octet-stream");
+    await uploadStorage(META_FILE,  "embeddings/cards-meta.json", "application/json");
+    const version = new Date().toISOString().slice(0, 10);
+    await updateFirestore({
+      version, count: embeddings.length, dims: DIMS,
+      checksum: createHash("md5").update(packed).digest("hex").slice(0, 8),
+      model: "Xenova/dinov2-base-multicrop",
+      storagePath: "embeddings/global-v1.bin",
+      metaPath: "embeddings/cards-meta.json",
+      updatedAt: version,
+    });
+    console.log(`\n  ✓ Done! ${cardCount.toLocaleString()} cards live on Firebase.\n`);
     return;
   }
 
