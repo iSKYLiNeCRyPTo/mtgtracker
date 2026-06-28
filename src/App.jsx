@@ -3782,7 +3782,7 @@ function RangeBar({ active, onChange }) {
 }
 
 // ── Home View ─────────────────────────────────────────────────────────────────
-function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
+function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPress, setTabFromHome, onBrowseSet, onExportCSV, onExportBackup, fbUser, fbSyncing, onSignIn, onSignOut }) {
   const [showVal,      setShowVal]      = useState(true);
   const [newSets,      setNewSets]      = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -4014,7 +4014,7 @@ function HomeView({ collection, boxes, onScanPress, onPriceCheckPress, onCardPre
             const thirtyAgo = new Date(Date.now()-30*864e5).toISOString().slice(0,10);
             const isNew = !isUpcoming && relDate >= thirtyAgo;
             return (
-              <div key={set.id} onClick={() => window.open(`https://scryfall.com/sets/${set.id}`, "_blank")}
+              <div key={set.id} onClick={() => onBrowseSet && onBrowseSet(set)}
                 style={{ flexShrink:0, width:130, background:CARD, border:`1px solid ${isNew?TEAL+"44":BORDER}`,
                   borderRadius:12, overflow:"hidden", cursor:"pointer", position:"relative" }}>
                 {/* Card art banner */}
@@ -4989,6 +4989,331 @@ function SearchView({ onCardPress, onAdd }) {
                   <button key={key} onClick={() => setCondition(key)} style={{
                     background: condition===key ? condColors[key]+"18" : "#0d0d0d",
                     border: `2px solid ${condition===key ? condColors[key] : BORDER}`,
+                    borderRadius:10, padding:"9px 12px", textAlign:"left", cursor:"pointer" }}>
+                    <div style={{ color:condColors[key], fontSize:10, fontWeight:700 }}>{label}</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:16,
+                      color: condition===key ? "#fff" : "#555", letterSpacing:1 }}>
+                      {price > 0 ? fmt(price) : "—"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ color:"#888", fontSize:11, letterSpacing:0.5, marginBottom:6 }}>PRICE PAID (optional)</div>
+            <input type="number" inputMode="decimal" placeholder="0.00"
+              value={costPaid} onChange={e => setCostPaid(e.target.value)}
+              style={{ width:"100%", padding:"12px 14px", background:"#0d0d0d",
+                border:`1px solid ${BORDER}`, borderRadius:12, color:"#fff",
+                fontSize:15, fontFamily:"inherit", outline:"none",
+                boxSizing:"border-box", marginBottom:16 }}/>
+            <button onClick={handleAdd} style={{ width:"100%", padding:15, background:TEAL,
+              border:"none", borderRadius:14, fontFamily:"'Bebas Neue',sans-serif",
+              fontSize:18, letterSpacing:1, color:"#000", cursor:"pointer", marginBottom:8 }}>
+              ADD TO COLLECTION
+            </button>
+            <button onClick={() => setAddingCard(null)} style={{ width:"100%", padding:10,
+              background:"none", border:"none", color:"#555", fontSize:13,
+              cursor:"pointer", fontFamily:"inherit" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Set Browse View ───────────────────────────────────────────────────────────
+function SetBrowseView({ setInfo, onBack, onCardPress }) {
+  const [cards, setCards]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter]   = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSetCards(setInfo.id).then(c => {
+      if (!cancelled) { setCards(c); setLoading(false); }
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [setInfo.id]);
+
+  const q = filter.toLowerCase();
+  const visible = q
+    ? cards.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.number === q ||
+        (c.type_line || "").toLowerCase().includes(q)
+      )
+    : cards;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+      <div style={{ padding:"14px 16px 10px", borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+          <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer",
+            padding:4, display:"flex", alignItems:"center" }}>
+            <Icon.Back size={22} color="#888"/>
+          </button>
+          {setInfo.symbol && (
+            <img src={setInfo.symbol} alt={setInfo.name}
+              style={{ width:22, height:22, objectFit:"contain", filter:"brightness(0) invert(0.6)" }}/>
+          )}
+          <div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:"#fff", letterSpacing:1, lineHeight:1 }}>
+              {setInfo.name}
+            </div>
+            <div style={{ color:"#555", fontSize:11, marginTop:1 }}>
+              {cards.length > 0 ? cards.length : (setInfo.total || "?")} cards · {setInfo.releaseDate}
+            </div>
+          </div>
+        </div>
+        <div style={{ position:"relative" }}>
+          <div style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)" }}>
+            <Icon.Search size={14} color="#555"/>
+          </div>
+          <input value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder="Filter by name, number or type..."
+            style={{ width:"100%", padding:"9px 12px 9px 30px", background:CARD,
+              border:`1px solid ${BORDER}`, borderRadius:10, color:"#fff",
+              fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+        </div>
+      </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"12px 16px", WebkitOverflowScrolling:"touch" }}>
+        {loading ? (
+          <div style={{ display:"flex", justifyContent:"center", padding:60 }}>
+            <div style={{ width:32, height:32, border:`3px solid ${TEAL}`, borderTopColor:"transparent",
+              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+          </div>
+        ) : (
+          <>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))", gap:10 }}>
+              {visible.map(card => (
+                <div key={card.id} onClick={() => onCardPress(card)}
+                  style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:10,
+                    overflow:"hidden", cursor:"pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = TEAL+"44"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = BORDER}>
+                  <div style={{ background:"#0d0d0d", display:"flex", justifyContent:"center", padding:6 }}>
+                    <img src={card.images?.small} alt={card.name} loading="lazy"
+                      style={{ height:90, objectFit:"contain" }}/>
+                  </div>
+                  <div style={{ padding:"5px 7px 7px" }}>
+                    <div style={{ color:"#fff", fontSize:10, fontWeight:600, lineHeight:1.2,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{card.name}</div>
+                    <div style={{ color:"#555", fontSize:9, marginTop:1 }}>#{card.number}</div>
+                    {card.prices?.usd && (
+                      <div style={{ color:TEAL, fontSize:10, marginTop:2, fontFamily:"'Bebas Neue',sans-serif" }}>
+                        ${card.prices.usd}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {visible.length === 0 && (
+              <div style={{ textAlign:"center", color:"#888", padding:40, fontSize:14 }}>No cards found</div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Card Browse Detail View ───────────────────────────────────────────────────
+const BROWSE_LEGALITY_FORMATS = [
+  ["Standard","standard"], ["Pioneer","pioneer"], ["Modern","modern"],
+  ["Legacy","legacy"],     ["Commander","commander"], ["Vintage","vintage"],
+  ["Pauper","pauper"],     ["Historic","historic"],
+];
+
+function browsRarityColor(r) {
+  if (!r) return "#888";
+  const l = r.toLowerCase();
+  if (l === "mythic")   return "#f97316";
+  if (l === "rare")     return "#f59e0b";
+  if (l === "uncommon") return "#94a3b8";
+  return "#888";
+}
+
+function CardBrowseDetailView({ card, onBack, onAdd }) {
+  const [addingCard, setAddingCard] = useState(null);
+  const [condition, setCondition]   = useState("near_mint");
+  const [acqType, setAcqType]       = useState("bought");
+  const [costPaid, setCostPaid]     = useState("");
+
+  const handleAdd = () => {
+    if (!addingCard) return;
+    onAdd(addingCard, condition, { acqType, costPaid: costPaid ? parseFloat(costPaid) : null });
+    setAddingCard(null); setCostPaid(""); setCondition("near_mint");
+  };
+
+  const p = card.prices || {};
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", overflowY:"auto",
+      WebkitOverflowScrolling:"touch" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px 12px",
+        borderBottom:`1px solid ${BORDER}`, flexShrink:0 }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer",
+          padding:4, display:"flex", alignItems:"center" }}>
+          <Icon.Back size={22} color="#888"/>
+        </button>
+        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"#fff",
+          letterSpacing:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {card.name}
+        </div>
+      </div>
+
+      <div style={{ padding:"16px 16px 120px" }}>
+        {/* Card image */}
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:16 }}>
+          <img
+            src={card.images?.large || card.images?.normal || card.images?.small}
+            alt={card.name}
+            style={{ width:"min(100%, 260px)", borderRadius:12,
+              boxShadow:"0 8px 32px rgba(0,0,0,0.6)" }}/>
+        </div>
+
+        {/* Oracle text card */}
+        <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+          padding:"14px 16px", marginBottom:12 }}>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#fff",
+            letterSpacing:0.5, marginBottom:2 }}>{card.name}</div>
+          {card.mana_cost && (
+            <div style={{ color:"#888", fontSize:12, marginBottom:6 }}>{card.mana_cost}</div>
+          )}
+          {card.type_line && (
+            <div style={{ color:"#aaa", fontSize:13, fontStyle:"italic", marginBottom:8,
+              paddingBottom:8, borderBottom:`1px solid ${BORDER}` }}>
+              {card.type_line}
+            </div>
+          )}
+          {card.oracle_text && (
+            <div style={{ color:"#ccc", fontSize:13, lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+              {card.oracle_text}
+            </div>
+          )}
+        </div>
+
+        {/* Print info */}
+        <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+          padding:"12px 16px", marginBottom:12 }}>
+          <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>PRINT</div>
+          <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+            <div>
+              <div style={{ color:"#555", fontSize:10 }}>Set</div>
+              <div style={{ color:"#fff", fontSize:13 }}>{card.set?.name}</div>
+            </div>
+            <div>
+              <div style={{ color:"#555", fontSize:10 }}>Number</div>
+              <div style={{ color:"#fff", fontSize:13 }}>#{card.number}</div>
+            </div>
+            <div>
+              <div style={{ color:"#555", fontSize:10 }}>Rarity</div>
+              <div style={{ color:browsRarityColor(card.rarity), fontSize:13, textTransform:"capitalize" }}>
+                {card.rarity}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Prices */}
+        {(p.usd || p.usd_foil || p.eur || p.tix) && (
+          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+            padding:"12px 16px", marginBottom:12 }}>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>PRICES</div>
+            <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+              {p.usd && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>USD</div>
+                  <div style={{ color:TEAL, fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd}</div>
+                </div>
+              )}
+              {p.usd_foil && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>USD Foil</div>
+                  <div style={{ color:"#f59e0b", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>${p.usd_foil}</div>
+                </div>
+              )}
+              {p.eur && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>EUR</div>
+                  <div style={{ color:"#aaa", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>€{p.eur}</div>
+                </div>
+              )}
+              {p.tix && (
+                <div>
+                  <div style={{ color:"#555", fontSize:10 }}>TIX</div>
+                  <div style={{ color:"#aaa", fontSize:18, fontFamily:"'Bebas Neue',sans-serif" }}>{p.tix}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Legalities */}
+        {card.legalities && Object.keys(card.legalities).length > 0 && (
+          <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14,
+            padding:"12px 16px", marginBottom:12 }}>
+            <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>LEGALITY</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 12px" }}>
+              {BROWSE_LEGALITY_FORMATS.map(([label, key]) => {
+                const status = card.legalities[key] || "not_legal";
+                const isLegal = status === "legal";
+                return (
+                  <div key={key} style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <div style={{ width:44, padding:"2px 0", textAlign:"center", borderRadius:4, flexShrink:0,
+                      background: isLegal ? "#16a34a22" : "#1a1a1a",
+                      border:`1px solid ${isLegal ? "#16a34a" : "#2a2a2a"}`,
+                      color: isLegal ? "#4ade80" : "#3a3a3a", fontSize:9, fontWeight:700 }}>
+                      {isLegal ? "LEGAL" : "NOT"}
+                    </div>
+                    <span style={{ color: isLegal ? "#ccc" : "#444", fontSize:12 }}>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sticky add button */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, padding:"12px 16px 36px",
+        background:"linear-gradient(transparent, #0a0a0a 40%)", pointerEvents:"none" }}>
+        <button onClick={() => setAddingCard(card)}
+          style={{ width:"100%", padding:15, background:TEAL, border:"none", borderRadius:14,
+            fontFamily:"'Bebas Neue',sans-serif", fontSize:18, letterSpacing:1,
+            color:"#000", cursor:"pointer", pointerEvents:"auto" }}>
+          + ADD TO COLLECTION
+        </button>
+      </div>
+
+      {/* Add card modal — reuses SearchView's pattern */}
+      {addingCard && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:300,
+          display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+          onClick={e => { if (e.target === e.currentTarget) setAddingCard(null); }}>
+          <div style={{ background:"#111", borderRadius:"20px 20px 0 0", padding:"20px 20px 100px",
+            borderTop:`1px solid ${BORDER}`, maxHeight:"85vh", overflowY:"auto", width:"100%" }}>
+            <div style={{ display:"flex", gap:14, alignItems:"center", marginBottom:20 }}>
+              <img src={addingCard.images?.small} alt={addingCard.name}
+                style={{ height:80, borderRadius:8, flexShrink:0 }}/>
+              <div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:"#fff" }}>{addingCard.name}</div>
+                <div style={{ color:"#555", fontSize:12 }}>{addingCard.set?.name} · #{addingCard.number}</div>
+              </div>
+            </div>
+            <div style={{ color:"#888", fontSize:11, letterSpacing:0.5, marginBottom:8 }}>CONDITION</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+              {Object.entries(condLabels).map(([key, label]) => {
+                const price = getPrices(addingCard).raw[key] || 0;
+                return (
+                  <button key={key} onClick={() => setCondition(key)} style={{
+                    background: condition===key ? condColors[key]+"18" : "#0d0d0d",
+                    border:`2px solid ${condition===key ? condColors[key] : BORDER}`,
                     borderRadius:10, padding:"9px 12px", textAlign:"left", cursor:"pointer" }}>
                     <div style={{ color:condColors[key], fontSize:10, fontWeight:700 }}>{label}</div>
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:16,
@@ -8542,6 +8867,8 @@ function App() {
   const [dupeCard, setDupeCard]     = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);
   const [detail, setDetail]         = useState(null);
+  const [browseSet, setBrowseSet]   = useState(null);
+  const [browseCard, setBrowseCard] = useState(null);
   const [collSubTab, setCollSubTab]   = useState("collection");
   const [masterSetId, setMasterSetId] = useState(null);
   const [collSort, setCollSort]       = useState("date_desc");
@@ -9017,7 +9344,7 @@ function App() {
 
         {/* Desktop sidebar — only on wide screens */}
         {isDesktop && <DesktopSidebar tabs={tabs} tab={tab} setTab={setTab} setScanning={setScanning} collection={collection}
-          onNavigate={(id) => { setTab(id); setDetail(null); setActiveBox(null); setActiveSetName(null); }}/>}
+          onNavigate={(id) => { setTab(id); setDetail(null); setBrowseSet(null); setBrowseCard(null); setActiveBox(null); setActiveSetName(null); }}/>}
 
         {/* Main content area */}
         <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0,
@@ -9042,6 +9369,18 @@ function App() {
                   setDetail(updatedItem);
                 }}
               />
+            ) : browseCard ? (
+              <CardBrowseDetailView
+                card={browseCard}
+                onBack={() => setBrowseCard(null)}
+                onAdd={addCard}
+              />
+            ) : browseSet ? (
+              <SetBrowseView
+                setInfo={browseSet}
+                onBack={() => setBrowseSet(null)}
+                onCardPress={card => setBrowseCard(card)}
+              />
             ) : tab==="home" ? (
               <div style={{ height:"100%", display:"flex", flexDirection:"column" }}>
                 {crashLog && (
@@ -9062,7 +9401,7 @@ function App() {
                   </div>
                 )}
                 <div style={{ flex:1, overflow:"hidden" }}>
-                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
+                  <HomeView collection={collection} boxes={boxes} onScanPress={()=>setScanning(true)} onPriceCheckPress={()=>setPriceChecking(true)} onCardPress={item=>setDetail(item)} setTabFromHome={setTab} onBrowseSet={set=>{ setBrowseSet(set); setBrowseCard(null); }} onExportCSV={exportCSV} onExportBackup={exportBackup} fbUser={fbUser} fbSyncing={fbSyncing} onSignIn={signInWithGoogle} onSignOut={signOutUser}/>
                 </div>
               </div>
             ) : tab==="search" ? (
@@ -9307,7 +9646,7 @@ function App() {
                 );
                 return (
                   <button key={t.id}
-                    onClick={t.action||(() => { setTab(t.id); setDetail(null); setActiveBox(null); setActiveSetName(null); if(t.id!=="collection"&&t.id!=="decks"){setCollSubTab("collection");setMasterSetId(null);} })}
+                    onClick={t.action||(() => { setTab(t.id); setDetail(null); setBrowseSet(null); setBrowseCard(null); setActiveBox(null); setActiveSetName(null); if(t.id!=="collection"&&t.id!=="decks"){setCollSubTab("collection");setMasterSetId(null);} })}
                     style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4,
                       background:'none', border:'none', cursor:'pointer', padding:'8px 0 4px' }}>
                     <TabIcon size={22} color={active?TEAL:"#444"}/>
