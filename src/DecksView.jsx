@@ -1077,7 +1077,14 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
   const [selectedCard, setSelectedCard] = useState(null); // cardId
   const [subTab, setSubTab]             = useState("cards");
   const [groupBy, setGroupBy]           = useState("category"); // "type" | "category"
+  const [isDesktop, setIsDesktop]       = useState(window.innerWidth >= 768);
   const timerRef = useRef(null);
+
+  useEffect(() => {
+    const handler = () => setIsDesktop(window.innerWidth >= 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   const fmt_obj = FORMATS.find(f => f.id === deck.format) || FORMATS[0];
   const col     = FORMAT_COLORS[deck.format] || "#6b7280";
@@ -1193,8 +1200,10 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
   }, 0);
   const pips = colorIdentityPips(deck);
 
-  // Stack layout constants
-  const SC_W = 76, SC_H = 106, SC_OFF = 30;
+  // Stack layout constants — larger cards on desktop
+  const SC_W   = isDesktop ? 96  : 76;
+  const SC_H   = isDesktop ? 134 : 106;
+  const SC_OFF = isDesktop ? 36  : 30;
 
   const renderTypeStack = (typeLabel, cards) => {
     const totalQty  = cards.reduce((s, c) => s + (c.qty || 1), 0);
@@ -1463,29 +1472,36 @@ function DeckEditor({ deck, onUpdate, onBack, onPlay, collection }) {
               </div>
             )}
 
-            {/* Stacked card groups */}
-            <div style={{ paddingTop:10, paddingBottom:80 }}>
-              {deck.cards.length === 0 ? (
-                <div style={{ textAlign:"center", padding:"40px 0", color:"#333" }}>
-                  <div style={{ marginBottom:8, display:"flex", justifyContent:"center" }}>
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
-                      <rect x="1" y="5" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.28"/>
-                      <rect x="4.5" y="3" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.58"/>
-                      <rect x="8" y="1" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.8"/>
-                    </svg>
-                  </div>
-                  <div style={{ fontSize:13 }}>Search above to add cards</div>
+            {/* Stacked card groups — single col on mobile, grid on desktop */}
+            {deck.cards.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"40px 0", color:"#333" }}>
+                <div style={{ marginBottom:8, display:"flex", justifyContent:"center" }}>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                    <rect x="1" y="5" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.28"/>
+                    <rect x="4.5" y="3" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.6" opacity="0.58"/>
+                    <rect x="8" y="1" width="13" height="17" rx="2" stroke="#444" strokeWidth="1.8"/>
+                  </svg>
                 </div>
-              ) : hasCats && groupBy === "category" ? (
-                catOrder.filter(cat => catGroups[cat]?.length > 0).map(cat =>
-                  renderTypeStack(cat, catGroups[cat])
-                )
-              ) : (
-                TYPE_ORDER.filter(t => grouped[t]?.length > 0).map(t =>
-                  renderTypeStack(t, grouped[t])
-                )
-              )}
-            </div>
+                <div style={{ fontSize:13 }}>Search above to add cards</div>
+              </div>
+            ) : (
+              <div style={{
+                display: isDesktop ? "grid" : "block",
+                gridTemplateColumns: isDesktop ? "repeat(auto-fill, minmax(300px, 1fr))" : undefined,
+                gap: isDesktop ? 8 : undefined,
+                padding: isDesktop ? "10px 16px 80px" : "10px 0 80px",
+                alignItems: "start",
+              }}>
+                {hasCats && groupBy === "category"
+                  ? catOrder.filter(cat => catGroups[cat]?.length > 0).map(cat =>
+                      renderTypeStack(cat, catGroups[cat])
+                    )
+                  : TYPE_ORDER.filter(t => grouped[t]?.length > 0).map(t =>
+                      renderTypeStack(t, grouped[t])
+                    )
+                }
+              </div>
+            )}
           </>
         )}
 
