@@ -1817,12 +1817,13 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const [cmdDmgPanel, setCmdDmgPanel] = useState(null);
   const [playerArts, setPlayerArts]       = useState([]);
   const [showWinnerPicker, setShowWinnerPicker] = useState(false);
-  const [rotationFlipped, setRotationFlipped]   = useState(false);
+  const [landscapeMode, setLandscapeMode]       = useState(false);
 
   const initPlayers = useCallback((count) => {
     const names = deck ? [`${deck.name}`, "Player 2","Player 3","Player 4","Player 5","Player 6"] : ["Player 1","Player 2","Player 3","Player 4","Player 5","Player 6"];
     const newPlayers = Array.from({ length: count }, (_, i) => ({
       name: names[i] || `Player ${i+1}`, life: startLife, poison: 0, color: PLAYER_COLORS[i],
+      cmdCast: 0, counters: 0,
     }));
     setPlayers(newPlayers);
     const dmg = {};
@@ -1846,14 +1847,13 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
     return () => ctrl.abort();
   }, [playerCount]);
 
-  // Top half rotates 180° so players facing them can read their panel; flip inverts this
-  const getRotation = (idx) => {
-    const topHalf = idx < Math.ceil(playerCount / 2);
-    return (topHalf !== rotationFlipped) ? 180 : 0;
-  };
+  // Top half always rotates 180° so players facing them can read their panel
+  const getRotation = (idx) => idx < Math.ceil(playerCount / 2) ? 180 : 0;
 
-  const adjustLife    = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, life: p.life+delta} : p));
-  const adjustPoison  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, poison: Math.max(0, p.poison+delta)} : p));
+  const adjustLife     = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, life: p.life+delta} : p));
+  const adjustPoison   = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, poison: Math.max(0, p.poison+delta)} : p));
+  const adjustCmdCast  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, cmdCast: Math.max(0, (p.cmdCast||0)+delta)} : p));
+  const adjustCounter  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, counters: Math.max(0, (p.counters||0)+delta)} : p));
   const adjustCmdDmg  = (victim, attacker, delta) => {
     setCmdDmg(prev => {
       const oldDmg = prev[victim]?.[attacker] || 0;
@@ -1875,7 +1875,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const resetGame = () => { initPlayers(playerCount); setGameOver(null); setShowResult(false); setResultNote(""); setOpponent(""); setShowWinnerPicker(false); };
 
   if (showSetup) {
-    return (
+    return createPortal(
       <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column", background:BG, paddingTop:"env(safe-area-inset-top, 44px)" }}>
         <div style={{ background:"#0d0d0d", borderBottom:`1px solid ${BORDER}`,
           padding:"12px 16px", display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
@@ -1944,14 +1944,22 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
             color:"#000", fontFamily:"'Bebas Neue',sans-serif", letterSpacing:1, fontSize:20, cursor:"pointer",
           }}>START MATCH</button>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   const cols = playerCount <= 2 ? 1 : 2;
 
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none", paddingTop:"env(safe-area-inset-top, 44px)" }}>
+  return createPortal(
+    <div style={landscapeMode ? {
+      position:"fixed", width:"100vh", height:"100vw", top:"50%", left:"50%",
+      transform:"translate(-50%, -50%) rotate(90deg)",
+      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
+    } : {
+      position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column",
+      background:"#080808", userSelect:"none", paddingTop:"env(safe-area-inset-top, 44px)",
+    }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px",
         background:"rgba(0,0,0,0.85)", flexShrink:0, borderBottom:`1px solid #111`, zIndex:10 }}>
         <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#444", padding:4 }}>
@@ -1962,8 +1970,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
         <div style={{ flex:1, fontFamily:"'Bebas Neue',sans-serif", color:"#333", fontSize:14, letterSpacing:1 }}>
           {deck?.name || "QUICK GAME"} · {fmt_obj.label.toUpperCase()}
         </div>
-        <button onPointerDown={e=>{ e.preventDefault(); setRotationFlipped(f => !f); }}
-          title="Flip rotation"
+        <button onPointerDown={e=>{ e.preventDefault(); setLandscapeMode(m => !m); }}
+          title="Toggle landscape"
           style={{ background:"none", border:`1px solid #222`, borderRadius:6, color:"#444",
             fontSize:14, cursor:"pointer", padding:"2px 8px", fontFamily:"inherit", lineHeight:1 }}>⇅</button>
         <button onClick={resetGame} style={{ background:"none", border:`1px solid #222`,
@@ -2048,6 +2056,39 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
                   )}
                   {isDead && <div style={{ color:"#333", fontSize:10, fontWeight:700 }}>ELIMINATED</div>}
                 </div>
+                {/* Commander tax + counters row */}
+                {isCommander && !isDead && (
+                  <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                    {/* Tax: tracks extra commander cast cost (×2 per death) */}
+                    <div style={{ display:"flex", alignItems:"center", gap:2,
+                      background:"rgba(0,0,0,0.45)", borderRadius:6, padding:"2px 5px" }}>
+                      <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,-1)}}
+                        style={{ width:18,height:18,background:"none",border:"none",color:"#555",
+                          cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center" }}>−</button>
+                      <div style={{ display:"flex",flexDirection:"column",alignItems:"center",minWidth:22 }}>
+                        <span style={{ color:"#555",fontSize:7,letterSpacing:0.5 }}>TAX</span>
+                        <span style={{ color: (p.cmdCast||0)>0?"#f59e0b":"#444",fontSize:11,fontWeight:700,lineHeight:1 }}>+{(p.cmdCast||0)*2}</span>
+                      </div>
+                      <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,+1)}}
+                        style={{ width:18,height:18,background:"none",border:"none",color:"#555",
+                          cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
+                    </div>
+                    {/* Counters: experience, energy, storm, etc. */}
+                    <div style={{ display:"flex", alignItems:"center", gap:2,
+                      background:"rgba(0,0,0,0.45)", borderRadius:6, padding:"2px 5px" }}>
+                      <button onPointerDown={e=>{e.preventDefault();adjustCounter(idx,-1)}}
+                        style={{ width:18,height:18,background:"none",border:"none",color:"#555",
+                          cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center" }}>−</button>
+                      <div style={{ display:"flex",flexDirection:"column",alignItems:"center",minWidth:22 }}>
+                        <span style={{ color:"#555",fontSize:7,letterSpacing:0.5 }}>CTR</span>
+                        <span style={{ color: (p.counters||0)>0?"#a78bfa":"#444",fontSize:11,fontWeight:700,lineHeight:1 }}>{p.counters||0}</span>
+                      </div>
+                      <button onPointerDown={e=>{e.preventDefault();adjustCounter(idx,+1)}}
+                        style={{ width:18,height:18,background:"none",border:"none",color:"#555",
+                          cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -2177,7 +2218,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
 
