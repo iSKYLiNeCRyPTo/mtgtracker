@@ -1956,33 +1956,37 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
     <div style={landscapeMode ? {
       position:"fixed", width:"100vh", height:"100vw", top:"50%", left:"50%",
       transform:"translate(-50%, -50%) rotate(90deg)",
-      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
+      zIndex:1000, background:"#080808", userSelect:"none",
     } : {
-      position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column",
-      background:"#080808", userSelect:"none", paddingTop:"env(safe-area-inset-top, 44px)",
+      position:"fixed", inset:0, zIndex:1000, background:"#080808", userSelect:"none",
     }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px",
-        background:"rgba(0,0,0,0.85)", flexShrink:0, borderBottom:`1px solid #111`, zIndex:10 }}>
-        <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#444", padding:4 }}>
+      {/* Header — floats over the grid */}
+      <div style={{ position:"absolute", top:0, left:0, right:0,
+        paddingTop:"env(safe-area-inset-top, 0px)",
+        display:"flex", alignItems:"center", gap:8, padding:"env(safe-area-inset-top, 0px) 14px 8px",
+        background:"linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%)",
+        zIndex:20, pointerEvents:"none" }}>
+        <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#555", padding:4, pointerEvents:"auto" }}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M11 3L5 9l6 6" stroke="#444" strokeWidth="1.8" strokeLinecap="round"/>
+            <path d="M11 3L5 9l6 6" stroke="#555" strokeWidth="1.8" strokeLinecap="round"/>
           </svg>
         </button>
-        <div style={{ flex:1, fontFamily:"'Bebas Neue',sans-serif", color:"#333", fontSize:14, letterSpacing:1 }}>
+        <div style={{ flex:1, fontFamily:"'Bebas Neue',sans-serif", color:"#444", fontSize:14, letterSpacing:1 }}>
           {deck?.name || "QUICK GAME"} · {fmt_obj.label.toUpperCase()}
         </div>
         <button onPointerDown={e=>{ e.preventDefault(); setLandscapeMode(m => !m); }}
           title="Toggle landscape"
-          style={{ background:"none", border:`1px solid #222`, borderRadius:6, color:"#444",
-            fontSize:14, cursor:"pointer", padding:"2px 8px", fontFamily:"inherit", lineHeight:1 }}>⇅</button>
-        <button onClick={resetGame} style={{ background:"none", border:`1px solid #222`,
-          borderRadius:6, color:"#444", fontSize:11, cursor:"pointer", padding:"3px 8px", fontFamily:"inherit" }}>Reset</button>
+          style={{ background:"none", border:`1px solid #333`, borderRadius:6, color:"#555",
+            fontSize:14, cursor:"pointer", padding:"2px 8px", fontFamily:"inherit", lineHeight:1, pointerEvents:"auto" }}>⇅</button>
+        <button onClick={resetGame} style={{ background:"none", border:`1px solid #333`,
+          borderRadius:6, color:"#555", fontSize:11, cursor:"pointer", padding:"3px 8px", fontFamily:"inherit", pointerEvents:"auto" }}>Reset</button>
       </div>
 
-      <div style={{ flex:1, display:"grid",
+      {/* Player grid — fills the entire screen */}
+      <div style={{ position:"absolute", inset:0, display:"grid",
         gridTemplateColumns: cols === 1 ? "1fr" : "1fr 1fr",
         gridTemplateRows: playerCount <= 2 ? `repeat(${playerCount}, 1fr)` : `repeat(${Math.ceil(playerCount/2)}, 1fr)`,
-        gap:2, padding:2, overflow:"hidden" }}>
+        gap:1, overflow:"hidden" }}>
         {players.map((p, idx) => {
           const isDead = p.life <= 0 || p.poison >= 10;
           const totalCmdDmgReceived = Object.values(cmdDmg[idx]||{}).reduce((s,v)=>s+v,0);
@@ -2142,13 +2146,15 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
         })}
       </div>
 
-      {/* Single declare-winner button — safe from accidental taps */}
+      {/* Declare-winner button — floats over the grid at bottom center */}
       {!gameOver && (
-        <div style={{ flexShrink:0, padding:"6px 14px", background:"rgba(0,0,0,0.85)",
-          borderTop:`1px solid #111`, display:"flex", justifyContent:"center" }}>
+        <div style={{ position:"absolute", bottom:"env(safe-area-inset-bottom, 0px)", left:0, right:0,
+          padding:"8px 14px", background:"linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)",
+          display:"flex", justifyContent:"center", zIndex:20, pointerEvents:"none" }}>
           <button onPointerDown={e=>{e.preventDefault();setShowWinnerPicker(true)}}
-            style={{ background:"none", border:`1px solid #222`, borderRadius:8,
-              color:"#333", fontSize:11, cursor:"pointer", padding:"5px 16px", fontFamily:"inherit" }}>
+            style={{ background:"rgba(0,0,0,0.55)", border:`1px solid #333`, borderRadius:8,
+              color:"#444", fontSize:11, cursor:"pointer", padding:"5px 16px", fontFamily:"inherit", pointerEvents:"auto",
+              backdropFilter:"blur(4px)" }}>
             👑 Declare Winner
           </button>
         </div>
@@ -2184,7 +2190,9 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
       )}
 
       {cmdDmgPanel !== null && isCommander && (
-        <div style={{ background:"#0d0d0d", border:`1px solid #1a1a1a`, padding:"12px 16px", flexShrink:0 }}>
+        <div style={{ position:"absolute", bottom:"env(safe-area-inset-bottom, 0px)", left:0, right:0,
+          background:"rgba(10,10,10,0.92)", borderTop:`1px solid #1a1a1a`, padding:"12px 16px", zIndex:25,
+          backdropFilter:"blur(8px)" }}>
           <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>
             CMD DAMAGE ON {players[cmdDmgPanel]?.name.toUpperCase()}
           </div>
