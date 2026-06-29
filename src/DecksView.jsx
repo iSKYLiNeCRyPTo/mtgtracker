@@ -1956,11 +1956,12 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
     <div style={landscapeMode ? {
       position:"fixed", width:"100vh", height:"100vw", top:"50%", left:"50%",
       transform:"translate(-50%, -50%) rotate(90deg)",
-      zIndex:1000, background:"#080808", userSelect:"none",
+      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
     } : {
-      position:"fixed", inset:0, zIndex:1000, background:"#080808", userSelect:"none",
+      position:"fixed", top:0, left:0, right:0, bottom:0,
+      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
     }}>
-      {/* Header — floats over the grid */}
+      {/* Header — floats over the grid as an absolute overlay, no flex space taken */}
       <div style={{ position:"absolute", top:0, left:0, right:0,
         paddingTop:"env(safe-area-inset-top, 0px)",
         display:"flex", alignItems:"center", gap:8, padding:"env(safe-area-inset-top, 0px) 14px 8px",
@@ -1982,8 +1983,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
           borderRadius:6, color:"#555", fontSize:11, cursor:"pointer", padding:"3px 8px", fontFamily:"inherit", pointerEvents:"auto" }}>Reset</button>
       </div>
 
-      {/* Player grid — fills the entire screen */}
-      <div style={{ position:"absolute", inset:0, display:"grid",
+      {/* Player grid — flex:1 fills all remaining height, which is 100% since header/footer are absolute */}
+      <div style={{ flex:1, display:"grid", minHeight:0,
         gridTemplateColumns: cols === 1 ? "1fr" : "1fr 1fr",
         gridTemplateRows: playerCount <= 2 ? `repeat(${playerCount}, 1fr)` : `repeat(${Math.ceil(playerCount/2)}, 1fr)`,
         gap:1, overflow:"hidden" }}>
