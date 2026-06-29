@@ -163,11 +163,32 @@ self.onmessage = async (e) => {
           log(`Using cached index (${version})`);
           buffer = cached;
         } else {
-          log(`Downloading index from ${e.data.url}...`);
+          log(`Downloading index...`);
           const resp = await fetch(e.data.url);
           if (!resp.ok) throw new Error(`Index fetch failed: ${resp.status}`);
-          buffer = await resp.arrayBuffer();
-          log(`Downloaded ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB`);
+
+          // Stream in chunks to avoid iOS Safari OOM on large arrayBuffer() calls
+          const contentLength = +resp.headers.get("Content-Length") || 0;
+          const reader = resp.body.getReader();
+          const chunks = [];
+          let received = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.length;
+            if (contentLength) {
+              const pct = Math.round(received / contentLength * 100);
+              if (pct % 10 === 0) log(`Downloading index: ${pct}%`);
+            }
+          }
+          // Single allocation — assemble all chunks into one buffer
+          const total = chunks.reduce((s, c) => s + c.length, 0);
+          buffer = new ArrayBuffer(total);
+          const view = new Uint8Array(buffer);
+          let off = 0;
+          for (const chunk of chunks) { view.set(chunk, off); off += chunk.length; }
+          log(`Downloaded ${(total / 1024 / 1024).toFixed(1)} MB`);
           // Cache in IDB (best-effort)
           try {
             const r = indexedDB.open(IDB_NAME, 1);
