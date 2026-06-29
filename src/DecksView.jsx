@@ -1815,8 +1815,9 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const [opponent, setOpponent] = useState("");
   const [cmdDmg, setCmdDmg]         = useState({});
   const [cmdDmgPanel, setCmdDmgPanel] = useState(null);
-  const [playerArts, setPlayerArts]   = useState([]);
+  const [playerArts, setPlayerArts]       = useState([]);
   const [showWinnerPicker, setShowWinnerPicker] = useState(false);
+  const [rotationFlipped, setRotationFlipped]   = useState(false);
 
   const initPlayers = useCallback((count) => {
     const names = deck ? [`${deck.name}`, "Player 2","Player 3","Player 4","Player 5","Player 6"] : ["Player 1","Player 2","Player 3","Player 4","Player 5","Player 6"];
@@ -1845,8 +1846,11 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
     return () => ctrl.abort();
   }, [playerCount]);
 
-  // Top half of the grid rotates 180° so players facing them can read their panel
-  const getRotation = (idx) => idx < Math.ceil(playerCount / 2) ? 180 : 0;
+  // Top half rotates 180° so players facing them can read their panel; flip inverts this
+  const getRotation = (idx) => {
+    const topHalf = idx < Math.ceil(playerCount / 2);
+    return (topHalf !== rotationFlipped) ? 180 : 0;
+  };
 
   const adjustLife    = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, life: p.life+delta} : p));
   const adjustPoison  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, poison: Math.max(0, p.poison+delta)} : p));
@@ -1872,7 +1876,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
 
   if (showSetup) {
     return (
-      <div style={{ display:"flex", flexDirection:"column", height:"100%", background:BG }}>
+      <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", flexDirection:"column", background:BG }}>
         <div style={{ background:"#0d0d0d", borderBottom:`1px solid ${BORDER}`,
           padding:"12px 16px", display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
           <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:TEAL }}>
@@ -1947,7 +1951,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const cols = playerCount <= 2 ? 1 : 2;
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:"#080808", userSelect:"none" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none" }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px",
         background:"rgba(0,0,0,0.85)", flexShrink:0, borderBottom:`1px solid #111`, zIndex:10 }}>
         <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#444", padding:4 }}>
@@ -1958,6 +1962,10 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
         <div style={{ flex:1, fontFamily:"'Bebas Neue',sans-serif", color:"#333", fontSize:14, letterSpacing:1 }}>
           {deck?.name || "QUICK GAME"} · {fmt_obj.label.toUpperCase()}
         </div>
+        <button onPointerDown={e=>{ e.preventDefault(); setRotationFlipped(f => !f); }}
+          title="Flip rotation"
+          style={{ background:"none", border:`1px solid #222`, borderRadius:6, color:"#444",
+            fontSize:14, cursor:"pointer", padding:"2px 8px", fontFamily:"inherit", lineHeight:1 }}>⇅</button>
         <button onClick={resetGame} style={{ background:"none", border:`1px solid #222`,
           borderRadius:6, color:"#444", fontSize:11, cursor:"pointer", padding:"3px 8px", fontFamily:"inherit" }}>Reset</button>
       </div>
