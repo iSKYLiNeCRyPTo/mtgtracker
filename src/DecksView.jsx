@@ -1817,12 +1817,13 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const [cmdDmgPanel, setCmdDmgPanel] = useState(null);
   const [playerArts, setPlayerArts]       = useState([]);
   const [showWinnerPicker, setShowWinnerPicker] = useState(false);
-  const [rotationFlipped, setRotationFlipped]   = useState(false);
+  const [landscapeMode, setLandscapeMode]       = useState(false);
 
   const initPlayers = useCallback((count) => {
     const names = deck ? [`${deck.name}`, "Player 2","Player 3","Player 4","Player 5","Player 6"] : ["Player 1","Player 2","Player 3","Player 4","Player 5","Player 6"];
     const newPlayers = Array.from({ length: count }, (_, i) => ({
       name: names[i] || `Player ${i+1}`, life: startLife, poison: 0, color: PLAYER_COLORS[i],
+      cmdCast: 0, counters: 0, mana: 0,
     }));
     setPlayers(newPlayers);
     const dmg = {};
@@ -1846,14 +1847,14 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
     return () => ctrl.abort();
   }, [playerCount]);
 
-  // Top half rotates 180° so players facing them can read their panel; flip inverts this
-  const getRotation = (idx) => {
-    const topHalf = idx < Math.ceil(playerCount / 2);
-    return (topHalf !== rotationFlipped) ? 180 : 0;
-  };
+  // Top half always rotates 180° so players facing them can read their panel
+  const getRotation = (idx) => idx < Math.ceil(playerCount / 2) ? 180 : 0;
 
-  const adjustLife    = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, life: p.life+delta} : p));
-  const adjustPoison  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, poison: Math.max(0, p.poison+delta)} : p));
+  const adjustLife     = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, life: p.life+delta} : p));
+  const adjustPoison   = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, poison: Math.max(0, p.poison+delta)} : p));
+  const adjustCmdCast  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, cmdCast: Math.max(0, (p.cmdCast||0)+delta)} : p));
+  const adjustCounter  = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, counters: Math.max(0, (p.counters||0)+delta)} : p));
+  const adjustMana     = (idx, delta) => setPlayers(prev => prev.map((p, i) => i===idx ? {...p, mana: Math.max(0, (p.mana||0)+delta)} : p));
   const adjustCmdDmg  = (victim, attacker, delta) => {
     setCmdDmg(prev => {
       const oldDmg = prev[victim]?.[attacker] || 0;
@@ -1875,7 +1876,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const resetGame = () => { initPlayers(playerCount); setGameOver(null); setShowResult(false); setResultNote(""); setOpponent(""); setShowWinnerPicker(false); };
 
   if (showSetup) {
-    return (
+    return createPortal(
       <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column", background:BG, paddingTop:"env(safe-area-inset-top, 44px)" }}>
         <div style={{ background:"#0d0d0d", borderBottom:`1px solid ${BORDER}`,
           padding:"12px 16px", display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
@@ -1944,14 +1945,22 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
             color:"#000", fontFamily:"'Bebas Neue',sans-serif", letterSpacing:1, fontSize:20, cursor:"pointer",
           }}>START MATCH</button>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   const cols = playerCount <= 2 ? 1 : 2;
 
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none", paddingTop:"env(safe-area-inset-top, 44px)" }}>
+  return createPortal(
+    <div style={landscapeMode ? {
+      position:"fixed", width:"100vh", height:"100vw", top:"50%", left:"50%",
+      transform:"translate(-50%, -50%) rotate(90deg)",
+      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
+    } : {
+      position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column",
+      background:"#080808", userSelect:"none", paddingTop:"env(safe-area-inset-top, 44px)",
+    }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px",
         background:"rgba(0,0,0,0.85)", flexShrink:0, borderBottom:`1px solid #111`, zIndex:10 }}>
         <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#444", padding:4 }}>
@@ -1962,8 +1971,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
         <div style={{ flex:1, fontFamily:"'Bebas Neue',sans-serif", color:"#333", fontSize:14, letterSpacing:1 }}>
           {deck?.name || "QUICK GAME"} · {fmt_obj.label.toUpperCase()}
         </div>
-        <button onPointerDown={e=>{ e.preventDefault(); setRotationFlipped(f => !f); }}
-          title="Flip rotation"
+        <button onPointerDown={e=>{ e.preventDefault(); setLandscapeMode(m => !m); }}
+          title="Toggle landscape"
           style={{ background:"none", border:`1px solid #222`, borderRadius:6, color:"#444",
             fontSize:14, cursor:"pointer", padding:"2px 8px", fontFamily:"inherit", lineHeight:1 }}>⇅</button>
         <button onClick={resetGame} style={{ background:"none", border:`1px solid #222`,
@@ -1984,8 +1993,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
             <div key={idx} style={{
               gridColumn: isLastOdd ? "1 / -1" : "auto",
               border: `1px solid ${isDead ? "#1a1a1a" : p.color+"33"}`,
-              borderRadius:10, display:"flex", flexDirection:"column", alignItems:"center",
-              justifyContent:"center", position:"relative", padding:"8px 6px",
+              borderRadius:10, display:"flex", flexDirection:"column",
+              position:"relative", padding:0,
               minHeight:0, overflow:"hidden", background:"#0a0a0a",
             }}>
               {/* Card art background */}
@@ -2000,54 +2009,133 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
                 ? "rgba(0,0,0,0.85)"
                 : `linear-gradient(135deg, rgba(0,0,0,0.65) 0%, ${p.color}18 100%)` }}/>
 
-              {/* Content — rotated to face the player */}
-              <div style={{ transform:`rotate(${rotation}deg)`, width:"100%", display:"flex",
-                flexDirection:"column", alignItems:"center", position:"relative", zIndex:1 }}>
-                <div style={{ color: isDead ? "#333" : p.color+"cc", fontSize:11, fontWeight:700,
-                  letterSpacing:0.5, marginBottom:4, textTransform:"uppercase" }}>{p.name}</div>
-                <div style={{ display:"flex", alignItems:"center", width:"100%", justifyContent:"center" }}>
+              {/* Content — rotated to face the player, fills full panel height */}
+              <div style={{ transform:`rotate(${rotation}deg)`, width:"100%", height:"100%",
+                display:"flex", flexDirection:"column", position:"relative", zIndex:1 }}>
+
+                {/* ── Top tracker row: DAMAGE + TAX (commander) / POISON (others) ── */}
+                <div style={{ display:"flex", gap:3, padding:"4px 4px 2px", flexShrink:0 }}>
+                  {isCommander ? (<>
+                    {/* DAMAGE — opens per-attacker panel */}
+                    <button onPointerDown={e=>{e.preventDefault();setCmdDmgPanel(cmdDmgPanel===idx?null:idx)}}
+                      style={{ flex:1, background: totalCmdDmgReceived>0?"rgba(168,85,247,0.15)":"rgba(0,0,0,0.45)",
+                        border:`1px solid ${totalCmdDmgReceived>0?"#a855f755":"rgba(255,255,255,0.08)"}`,
+                        borderRadius:8, cursor:"pointer", padding:"5px 4px",
+                        display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1l1.8 3.6L13 5.5l-3 2.9.7 4.1L7 10.4l-3.7 2.1.7-4.1-3-2.9 4.2-.9L7 1z"
+                          fill={totalCmdDmgReceived>0?"#a855f7":"#444"} />
+                      </svg>
+                      <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>DAMAGE</span>
+                      <span style={{ color: totalCmdDmgReceived>0?"#a855f7":"#444", fontSize:12, fontWeight:700, lineHeight:1 }}>{totalCmdDmgReceived}</span>
+                    </button>
+                    {/* TAX */}
+                    <div style={{ flex:1, background: (p.cmdCast||0)>0?"rgba(245,158,11,0.12)":"rgba(0,0,0,0.45)",
+                      border:`1px solid ${(p.cmdCast||0)>0?"#f59e0b55":"rgba(255,255,255,0.08)"}`,
+                      borderRadius:8, padding:"5px 4px",
+                      display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <rect x="2" y="4" width="10" height="7" rx="1.5" stroke={(p.cmdCast||0)>0?"#f59e0b":"#444"} strokeWidth="1.2"/>
+                        <path d="M5 4V3a2 2 0 014 0v1" stroke={(p.cmdCast||0)>0?"#f59e0b":"#444"} strokeWidth="1.2"/>
+                      </svg>
+                      <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>TAX</span>
+                      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+                        <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,-1)}}
+                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
+                        <span style={{ color:(p.cmdCast||0)>0?"#f59e0b":"#444", fontSize:11, fontWeight:700, minWidth:18, textAlign:"center", lineHeight:1 }}>+{(p.cmdCast||0)*2}</span>
+                        <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,+1)}}
+                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
+                      </div>
+                    </div>
+                  </>) : (
+                    /* Non-commander: show poison */
+                    <div style={{ flex:1, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.08)",
+                      borderRadius:8, padding:"5px 4px", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                      <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill={p.poison>0?"#22c55e":"#333"} stroke="#444"/></svg>
+                      <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>POISON</span>
+                      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+                        <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,-1)}} style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
+                        <span style={{ color:p.poison>0?"#22c55e":"#444", fontSize:11, fontWeight:700, minWidth:16, textAlign:"center" }}>{p.poison}</span>
+                        <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,+1)}} style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Life area: − | big number | + with player name on right edge ── */}
+                <div style={{ flex:1, display:"flex", alignItems:"center", position:"relative", minHeight:0 }}>
                   <button onPointerDown={e=>{ e.preventDefault(); adjustLife(idx,-1); }}
-                    style={{ flex:1, height:80, background:"transparent", border:"none", cursor:"pointer",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                      color: isDead ? "#222" : "#444", fontSize:36, fontWeight:100 }}>−</button>
-                  <div style={{ textAlign:"center", lineHeight:1 }}>
+                    style={{ alignSelf:"stretch", flex:1, background:"transparent", border:"none",
+                      cursor:"pointer", color: isDead?"#1a1a1a":"#2a2a2a", fontSize:40, fontWeight:100,
+                      display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
+                  <div style={{ textAlign:"center", lineHeight:1, pointerEvents:"none", userSelect:"none" }}>
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif",
-                      fontSize: Math.abs(p.life) >= 100 ? 52 : 72,
-                      color: isDead ? "#2a2a2a" : p.life <= 5 ? "#ef4444" : "#fff",
-                      letterSpacing:-1, transition:"color 0.3s",
-                      textShadow: isDead ? "none" : "0 2px 12px rgba(0,0,0,0.8)" }}>{p.life}</div>
+                      fontSize: Math.abs(p.life) >= 100 ? 62 : Math.abs(p.life) >= 10 ? 80 : 90,
+                      color: isDead ? "#1e1e1e" : p.life <= 5 ? "#ef4444" : "#fff",
+                      letterSpacing:-2, transition:"color 0.3s",
+                      textShadow: isDead ? "none" : "0 2px 16px rgba(0,0,0,0.9)" }}>{p.life}</div>
+                    {isDead && <div style={{ color:"#333", fontSize:9, fontWeight:700, letterSpacing:1 }}>ELIMINATED</div>}
                   </div>
                   <button onPointerDown={e=>{ e.preventDefault(); adjustLife(idx,+1); }}
-                    style={{ flex:1, height:80, background:"transparent", border:"none", cursor:"pointer",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                      color: isDead ? "#222" : "#444", fontSize:36, fontWeight:100 }}>+</button>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                    <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,-1)}}
-                      style={{ width:22,height:22,borderRadius:4,background:"rgba(0,0,0,0.5)",border:`1px solid #333`,
-                        color:"#555",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center" }}>−</button>
-                    <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-                      <svg width="10" height="10" viewBox="0 0 10 10">
-                        <circle cx="5" cy="5" r="4" fill={p.poison > 0 ? "#22c55e" : "#222"} stroke="#333"/>
-                      </svg>
-                      <span style={{ color: p.poison > 0 ? "#22c55e" : "#333", fontSize:12, fontWeight:700, minWidth:12, textAlign:"center" }}>{p.poison}</span>
-                    </div>
-                    <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,+1)}}
-                      style={{ width:22,height:22,borderRadius:4,background:"rgba(0,0,0,0.5)",border:`1px solid #333`,
-                        color:"#555",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
+                    style={{ alignSelf:"stretch", flex:1, background:"transparent", border:"none",
+                      cursor:"pointer", color: isDead?"#1a1a1a":"#2a2a2a", fontSize:40, fontWeight:100,
+                      display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
+                  {/* Player name on right edge, rotated to read upward */}
+                  <div style={{ position:"absolute", right:2, top:"50%",
+                    transform:"translateY(-50%) rotate(90deg)", transformOrigin:"center center",
+                    display:"flex", alignItems:"center", gap:4, pointerEvents:"none", whiteSpace:"nowrap" }}>
+                    <span style={{ color: isDead?"#2a2a2a":p.color+"bb", fontSize:9, fontWeight:700,
+                      letterSpacing:0.8, textTransform:"uppercase" }}>{p.name}</span>
                   </div>
-                  {isCommander && (
-                    <button onPointerDown={e=>{e.preventDefault();setCmdDmgPanel(cmdDmgPanel===idx?null:idx)}}
-                      style={{ background: totalCmdDmgReceived>0?"#a855f722":"rgba(0,0,0,0.5)",
-                        border:`1px solid ${totalCmdDmgReceived>0?"#a855f7":"#333"}`,
-                        borderRadius:6, color: totalCmdDmgReceived>0?"#a855f7":"#555",
-                        fontSize:10, fontWeight:700, cursor:"pointer", padding:"3px 7px", fontFamily:"inherit" }}>
-                      ⚔ {totalCmdDmgReceived||0}
-                    </button>
-                  )}
-                  {isDead && <div style={{ color:"#333", fontSize:10, fontWeight:700 }}>ELIMINATED</div>}
                 </div>
+
+                {/* ── Bottom tracker row: COUNTERS + MANA (commander) / empty (others) ── */}
+                {isCommander && (
+                  <div style={{ display:"flex", gap:3, padding:"2px 4px 4px", flexShrink:0 }}>
+                    {/* COUNTERS */}
+                    <div style={{ flex:1, background: (p.counters||0)>0?"rgba(167,139,250,0.12)":"rgba(0,0,0,0.45)",
+                      border:`1px solid ${(p.counters||0)>0?"#a78bfa55":"rgba(255,255,255,0.08)"}`,
+                      borderRadius:8, padding:"5px 4px",
+                      display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        {[0,1,2].map(r=>[0,1,2].map(c=>(
+                          <rect key={`${r}${c}`} x={2+c*4} y={2+r*4} width="2.5" height="2.5" rx="0.5"
+                            fill={(p.counters||0) > r*3+c ? "#a78bfa" : "#333"}/>
+                        )))}
+                      </svg>
+                      <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>COUNTERS</span>
+                      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+                        <button onPointerDown={e=>{e.preventDefault();adjustCounter(idx,-1)}}
+                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
+                        <span style={{ color:(p.counters||0)>0?"#a78bfa":"#444", fontSize:11, fontWeight:700, minWidth:16, textAlign:"center", lineHeight:1 }}>{p.counters||0}</span>
+                        <button onPointerDown={e=>{e.preventDefault();adjustCounter(idx,+1)}}
+                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
+                      </div>
+                    </div>
+                    {/* MANA */}
+                    <div style={{ flex:1, background: (p.mana||0)>0?"rgba(96,165,250,0.12)":"rgba(0,0,0,0.45)",
+                      border:`1px solid ${(p.mana||0)>0?"#60a5fa55":"rgba(255,255,255,0.08)"}`,
+                      borderRadius:8, padding:"5px 4px",
+                      display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <circle cx="7" cy="7" r="2" fill={(p.mana||0)>0?"#60a5fa":"#444"}/>
+                        {[0,60,120,180,240,300].map((a,i)=>{
+                          const rad=(a-90)*Math.PI/180;
+                          return <circle key={i} cx={7+4.5*Math.cos(rad)} cy={7+4.5*Math.sin(rad)} r="1.2"
+                            fill={(p.mana||0)>i?"#60a5fa":"#333"}/>;
+                        })}
+                      </svg>
+                      <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>MANA</span>
+                      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+                        <button onPointerDown={e=>{e.preventDefault();adjustMana(idx,-1)}}
+                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
+                        <span style={{ color:(p.mana||0)>0?"#60a5fa":"#444", fontSize:11, fontWeight:700, minWidth:16, textAlign:"center", lineHeight:1 }}>{p.mana||0}</span>
+                        <button onPointerDown={e=>{e.preventDefault();adjustMana(idx,+1)}}
+                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -2177,7 +2265,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
 
