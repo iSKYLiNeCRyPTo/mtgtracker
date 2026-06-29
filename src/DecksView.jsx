@@ -1876,7 +1876,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
 
   if (showSetup) {
     return (
-      <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", flexDirection:"column", background:BG }}>
+      <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column", background:BG, paddingTop:"env(safe-area-inset-top, 44px)" }}>
         <div style={{ background:"#0d0d0d", borderBottom:`1px solid ${BORDER}`,
           padding:"12px 16px", display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
           <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:TEAL }}>
@@ -1951,7 +1951,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
   const cols = playerCount <= 2 ? 1 : 2;
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none", paddingTop:"env(safe-area-inset-top, 44px)" }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px",
         background:"rgba(0,0,0,0.85)", flexShrink:0, borderBottom:`1px solid #111`, zIndex:10 }}>
         <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#444", padding:4 }}>
