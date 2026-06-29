@@ -2013,10 +2013,10 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
               <div style={{ transform:`rotate(${rotation}deg)`, width:"100%", height:"100%",
                 display:"flex", flexDirection:"column", position:"relative", zIndex:1 }}>
 
-                {/* ── Top tracker row: DAMAGE + TAX (commander) / POISON (others) ── */}
+                {/* ── Top tracker row: DAMAGE + TAX (commander) / POISON + CTR (others) ── */}
                 <div style={{ display:"flex", gap:3, padding:"4px 4px 2px", flexShrink:0 }}>
-                  {isCommander ? (<>
-                    {/* DAMAGE — opens per-attacker panel */}
+                  {/* Left: DAMAGE (cmdr) or POISON (other) */}
+                  {isCommander ? (
                     <button onPointerDown={e=>{e.preventDefault();setCmdDmgPanel(cmdDmgPanel===idx?null:idx)}}
                       style={{ flex:1, background: totalCmdDmgReceived>0?"rgba(168,85,247,0.15)":"rgba(0,0,0,0.45)",
                         border:`1px solid ${totalCmdDmgReceived>0?"#a855f755":"rgba(255,255,255,0.08)"}`,
@@ -2029,44 +2029,46 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
                       <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>DAMAGE</span>
                       <span style={{ color: totalCmdDmgReceived>0?"#a855f7":"#444", fontSize:12, fontWeight:700, lineHeight:1 }}>{totalCmdDmgReceived}</span>
                     </button>
-                    {/* TAX */}
-                    <div style={{ flex:1, background: (p.cmdCast||0)>0?"rgba(245,158,11,0.12)":"rgba(0,0,0,0.45)",
-                      border:`1px solid ${(p.cmdCast||0)>0?"#f59e0b55":"rgba(255,255,255,0.08)"}`,
-                      borderRadius:8, padding:"5px 4px",
-                      display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <rect x="2" y="4" width="10" height="7" rx="1.5" stroke={(p.cmdCast||0)>0?"#f59e0b":"#444"} strokeWidth="1.2"/>
-                        <path d="M5 4V3a2 2 0 014 0v1" stroke={(p.cmdCast||0)>0?"#f59e0b":"#444"} strokeWidth="1.2"/>
-                      </svg>
-                      <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>TAX</span>
-                      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
-                        <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,-1)}}
-                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
-                        <span style={{ color:(p.cmdCast||0)>0?"#f59e0b":"#444", fontSize:11, fontWeight:700, minWidth:18, textAlign:"center", lineHeight:1 }}>+{(p.cmdCast||0)*2}</span>
-                        <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,+1)}}
-                          style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
-                      </div>
-                    </div>
-                  </>) : (
-                    /* Non-commander: show poison */
-                    <div style={{ flex:1, background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.08)",
+                  ) : (
+                    <div style={{ flex:1, background: p.poison>0?"rgba(34,197,94,0.12)":"rgba(0,0,0,0.45)",
+                      border:`1px solid ${p.poison>0?"#22c55e55":"rgba(255,255,255,0.08)"}`,
                       borderRadius:8, padding:"5px 4px", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
-                      <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill={p.poison>0?"#22c55e":"#333"} stroke="#444"/></svg>
+                      <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill={p.poison>0?"#22c55e":"#333"} stroke="#444"/></svg>
                       <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>POISON</span>
                       <div style={{ display:"flex", alignItems:"center", gap:2 }}>
-                        <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,-1)}} style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
-                        <span style={{ color:p.poison>0?"#22c55e":"#444", fontSize:11, fontWeight:700, minWidth:16, textAlign:"center" }}>{p.poison}</span>
-                        <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,+1)}} style={{ width:14,height:14,background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
+                        <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,-1)}} style={{ width:14,height:14,background:"none",border:"none",color:"#666",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
+                        <span style={{ color:p.poison>0?"#22c55e":"#555", fontSize:11, fontWeight:700, minWidth:16, textAlign:"center" }}>{p.poison}</span>
+                        <button onPointerDown={e=>{e.preventDefault();adjustPoison(idx,+1)}} style={{ width:14,height:14,background:"none",border:"none",color:"#666",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
                       </div>
                     </div>
                   )}
+                  {/* Right: TAX (cmdr) or generic CTR (other) */}
+                  <div style={{ flex:1, background: (p.cmdCast||0)>0?"rgba(245,158,11,0.12)":"rgba(0,0,0,0.45)",
+                    border:`1px solid ${(p.cmdCast||0)>0?"#f59e0b55":"rgba(255,255,255,0.08)"}`,
+                    borderRadius:8, padding:"5px 4px",
+                    display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <rect x="2" y="4" width="10" height="7" rx="1.5" stroke={(p.cmdCast||0)>0?"#f59e0b":"#444"} strokeWidth="1.2"/>
+                      <path d="M5 4V3a2 2 0 014 0v1" stroke={(p.cmdCast||0)>0?"#f59e0b":"#444"} strokeWidth="1.2"/>
+                    </svg>
+                    <span style={{ color:"#666", fontSize:8, letterSpacing:0.5, lineHeight:1 }}>{isCommander?"TAX":"CTR"}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+                      <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,-1)}}
+                        style={{ width:14,height:14,background:"none",border:"none",color:"#666",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>−</button>
+                      <span style={{ color:(p.cmdCast||0)>0?"#f59e0b":"#555", fontSize:11, fontWeight:700, minWidth:18, textAlign:"center", lineHeight:1 }}>
+                        {isCommander ? `+${(p.cmdCast||0)*2}` : (p.cmdCast||0)}
+                      </span>
+                      <button onPointerDown={e=>{e.preventDefault();adjustCmdCast(idx,+1)}}
+                        style={{ width:14,height:14,background:"none",border:"none",color:"#666",cursor:"pointer",fontSize:13,lineHeight:1,padding:0 }}>+</button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* ── Life area: − | big number | + with player name on right edge ── */}
                 <div style={{ flex:1, display:"flex", alignItems:"center", position:"relative", minHeight:0 }}>
                   <button onPointerDown={e=>{ e.preventDefault(); adjustLife(idx,-1); }}
                     style={{ alignSelf:"stretch", flex:1, background:"transparent", border:"none",
-                      cursor:"pointer", color: isDead?"#1a1a1a":"#2a2a2a", fontSize:40, fontWeight:100,
+                      cursor:"pointer", color: isDead?"#1a1a1a":"rgba(255,255,255,0.25)", fontSize:40, fontWeight:100,
                       display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
                   <div style={{ textAlign:"center", lineHeight:1, pointerEvents:"none", userSelect:"none" }}>
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif",
@@ -2078,7 +2080,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
                   </div>
                   <button onPointerDown={e=>{ e.preventDefault(); adjustLife(idx,+1); }}
                     style={{ alignSelf:"stretch", flex:1, background:"transparent", border:"none",
-                      cursor:"pointer", color: isDead?"#1a1a1a":"#2a2a2a", fontSize:40, fontWeight:100,
+                      cursor:"pointer", color: isDead?"#1a1a1a":"rgba(255,255,255,0.25)", fontSize:40, fontWeight:100,
                       display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
                   {/* Player name on right edge, rotated to read upward */}
                   <div style={{ position:"absolute", right:2, top:"50%",
@@ -2089,9 +2091,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
                   </div>
                 </div>
 
-                {/* ── Bottom tracker row: COUNTERS + MANA (commander) / empty (others) ── */}
-                {isCommander && (
-                  <div style={{ display:"flex", gap:3, padding:"2px 4px 4px", flexShrink:0 }}>
+                {/* ── Bottom tracker row: COUNTERS + MANA (always) ── */}
+                <div style={{ display:"flex", gap:3, padding:"2px 4px 4px", flexShrink:0 }}>
                     {/* COUNTERS */}
                     <div style={{ flex:1, background: (p.counters||0)>0?"rgba(167,139,250,0.12)":"rgba(0,0,0,0.45)",
                       border:`1px solid ${(p.counters||0)>0?"#a78bfa55":"rgba(255,255,255,0.08)"}`,
@@ -2135,7 +2136,7 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
                       </div>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           );
