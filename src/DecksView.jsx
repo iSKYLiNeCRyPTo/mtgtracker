@@ -1956,17 +1956,18 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
     <div style={landscapeMode ? {
       position:"fixed", width:"100vh", height:"100vw", top:"50%", left:"50%",
       transform:"translate(-50%, -50%) rotate(90deg)",
-      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
+      zIndex:1000, background:"#080808", userSelect:"none",
     } : {
       position:"fixed", top:0, left:0, right:0, bottom:0,
-      zIndex:1000, display:"flex", flexDirection:"column", background:"#080808", userSelect:"none",
+      zIndex:1000, background:"#080808", userSelect:"none",
     }}>
-      {/* Header — floats over the grid as an absolute overlay, no flex space taken */}
-      <div style={{ position:"absolute", top:0, left:0, right:0,
+      {/* Header — absolute overlay, safe-area padding pushes content below notch */}
+      <div style={{ position:"absolute", top:0, left:0, right:0, zIndex:20,
         paddingTop:"env(safe-area-inset-top, 0px)",
-        display:"flex", alignItems:"center", gap:8, padding:"env(safe-area-inset-top, 0px) 14px 8px",
+        display:"flex", alignItems:"center", gap:8,
+        padding:"env(safe-area-inset-top, 0px) 14px 8px",
         background:"linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%)",
-        zIndex:20, pointerEvents:"none" }}>
+        pointerEvents:"none" }}>
         <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#555", padding:4, pointerEvents:"auto" }}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path d="M11 3L5 9l6 6" stroke="#555" strokeWidth="1.8" strokeLinecap="round"/>
@@ -1983,8 +1984,8 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
           borderRadius:6, color:"#555", fontSize:11, cursor:"pointer", padding:"3px 8px", fontFamily:"inherit", pointerEvents:"auto" }}>Reset</button>
       </div>
 
-      {/* Player grid — flex:1 fills all remaining height, which is 100% since header/footer are absolute */}
-      <div style={{ flex:1, display:"grid", minHeight:0,
+      {/* Player grid — explicit top/left/right/bottom:0 gives CSS Grid a definite height so 1fr rows fill correctly */}
+      <div style={{ position:"absolute", top:0, left:0, right:0, bottom:0, display:"grid",
         gridTemplateColumns: cols === 1 ? "1fr" : "1fr 1fr",
         gridTemplateRows: playerCount <= 2 ? `repeat(${playerCount}, 1fr)` : `repeat(${Math.ceil(playerCount/2)}, 1fr)`,
         gap:1, overflow:"hidden" }}>
@@ -2147,11 +2148,13 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
         })}
       </div>
 
-      {/* Declare-winner button — floats over the grid at bottom center */}
+      {/* Declare-winner — pinned to physical bottom edge; paddingBottom keeps button above home indicator */}
       {!gameOver && (
-        <div style={{ position:"absolute", bottom:"env(safe-area-inset-bottom, 0px)", left:0, right:0,
-          padding:"8px 14px", background:"linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)",
-          display:"flex", justifyContent:"center", zIndex:20, pointerEvents:"none" }}>
+        <div style={{ position:"absolute", bottom:0, left:0, right:0, zIndex:20,
+          paddingBottom:"env(safe-area-inset-bottom, 0px)",
+          padding:"8px 14px env(safe-area-inset-bottom, 8px)",
+          background:"linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)",
+          display:"flex", justifyContent:"center", pointerEvents:"none" }}>
           <button onPointerDown={e=>{e.preventDefault();setShowWinnerPicker(true)}}
             style={{ background:"rgba(0,0,0,0.55)", border:`1px solid #333`, borderRadius:8,
               color:"#444", fontSize:11, cursor:"pointer", padding:"5px 16px", fontFamily:"inherit", pointerEvents:"auto",
@@ -2191,8 +2194,9 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
       )}
 
       {cmdDmgPanel !== null && isCommander && (
-        <div style={{ position:"absolute", bottom:"env(safe-area-inset-bottom, 0px)", left:0, right:0,
-          background:"rgba(10,10,10,0.92)", borderTop:`1px solid #1a1a1a`, padding:"12px 16px", zIndex:25,
+        <div style={{ position:"absolute", bottom:0, left:0, right:0, zIndex:25,
+          paddingBottom:"env(safe-area-inset-bottom, 0px)",
+          background:"rgba(10,10,10,0.92)", borderTop:`1px solid #1a1a1a`, padding:"12px 16px env(safe-area-inset-bottom, 12px)",
           backdropFilter:"blur(8px)" }}>
           <div style={{ color:"#555", fontSize:10, letterSpacing:0.5, marginBottom:8 }}>
             CMD DAMAGE ON {players[cmdDmgPanel]?.name.toUpperCase()}
