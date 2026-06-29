@@ -126,7 +126,69 @@ self.onmessage = async (e) => {
 
   if (type === "loadGlobalIndex") {
     try {
-      globalEmbeddings = parseGlobalIndex(e.data.buffer);
+      let buffer = e.data.buffer || null;
+
+      // If a URL is provided, fetch/cache in the worker (avoids OOM in main thread on iOS)
+      if (!buffer && e.data.url) {
+        const IDB_NAME  = "mtgtracker-global-index";
+        const IDB_STORE = "index";
+        const version   = e.data.version || "default";
+
+        // Check IDB cache first
+        const cached = await new Promise(res => {
+          const r = indexedDB.open(IDB_NAME, 1);
+          r.onupgradeneeded = ev => ev.target.result.createObjectStore(IDB_STORE);
+          r.onsuccess = ev => {
+            const tx = ev.target.result.transaction(IDB_STORE, "readonly");
+            const g  = tx.objectStore(IDB_STORE).get("index-buffer");
+            g.onsuccess = () => res(g.result ?? null);
+            g.onerror   = () => res(null);
+          };
+          r.onerror = () => res(null);
+        });
+
+        const cachedMeta = await new Promise(res => {
+          const r = indexedDB.open(IDB_NAME, 1);
+          r.onupgradeneeded = ev => ev.target.result.createObjectStore(IDB_STORE);
+          r.onsuccess = ev => {
+            const tx = ev.target.result.transaction(IDB_STORE, "readonly");
+            const g  = tx.objectStore(IDB_STORE).get("index-meta");
+            g.onsuccess = () => res(g.result ?? null);
+            g.onerror   = () => res(null);
+          };
+          r.onerror = () => res(null);
+        });
+
+        if (cached && cachedMeta?.version === version) {
+          log(`Using cached index (${version})`);
+          buffer = cached;
+        } else {
+          log(`Downloading index from ${e.data.url}...`);
+          const resp = await fetch(e.data.url);
+          if (!resp.ok) throw new Error(`Index fetch failed: ${resp.status}`);
+          buffer = await resp.arrayBuffer();
+          log(`Downloaded ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB`);
+          // Cache in IDB (best-effort)
+          try {
+            const r = indexedDB.open(IDB_NAME, 1);
+            await new Promise((res, rej) => {
+              r.onupgradeneeded = ev => ev.target.result.createObjectStore(IDB_STORE);
+              r.onsuccess = ev => {
+                const tx = ev.target.result.transaction(IDB_STORE, "readwrite");
+                tx.objectStore(IDB_STORE).put(buffer, "index-buffer");
+                tx.objectStore(IDB_STORE).put({ version }, "index-meta");
+                tx.oncomplete = res;
+                tx.onerror    = rej;
+              };
+              r.onerror = rej;
+            });
+            log("Index cached in IDB");
+          } catch { log("IDB cache failed — continuing without cache"); }
+        }
+      }
+
+      if (!buffer) throw new Error("No index buffer available");
+      globalEmbeddings = parseGlobalIndex(buffer);
       if (e.data.fingerprints) {
         let added = 0;
         for (const [cardId, fps] of Object.entries(e.data.fingerprints)) {
@@ -141,7 +203,7 @@ self.onmessage = async (e) => {
       await getExtractor();
       self.postMessage({ type: "globalIndexLoaded", count: globalEmbeddings.length });
     } catch (err) {
-      log(`Global index parse error: ${err.message}`);
+      log(`Global index error: ${err.message}`);
       self.postMessage({ type: "error", msg: `Global index failed: ${err.message}` });
     }
   }
