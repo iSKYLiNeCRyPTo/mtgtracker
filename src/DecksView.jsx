@@ -1961,27 +1961,27 @@ function LifeCounter({ deck, onClose, onRecordResult, allDecks }) {
       position:"fixed", top:0, left:0, right:0, bottom:0,
       zIndex:1000, background:"#080808", userSelect:"none",
     }}>
-      {/* Header — absolute overlay, safe-area padding pushes content below notch */}
-      <div style={{ position:"absolute", top:0, left:0, right:0, zIndex:20,
-        paddingTop:"env(safe-area-inset-top, 0px)",
-        display:"flex", alignItems:"center", gap:8,
-        padding:"env(safe-area-inset-top, 0px) 14px 8px",
-        background:"linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%)",
-        pointerEvents:"none" }}>
-        <button onClick={() => setShowSetup(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#555", padding:4, pointerEvents:"auto" }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M11 3L5 9l6 6" stroke="#555" strokeWidth="1.8" strokeLinecap="round"/>
-          </svg>
-        </button>
-        <div style={{ flex:1, fontFamily:"'Bebas Neue',sans-serif", color:"#444", fontSize:14, letterSpacing:1 }}>
-          {deck?.name || "QUICK GAME"} · {fmt_obj.label.toUpperCase()}
-        </div>
+      {/* Back button — top-left corner chip, no full-width bar */}
+      <button onClick={() => setShowSetup(true)}
+        style={{ position:"absolute", top:"env(safe-area-inset-top, 8px)", left:8, zIndex:20,
+          background:"rgba(0,0,0,0.45)", border:"none", borderRadius:8, cursor:"pointer",
+          color:"#666", padding:"6px 8px", backdropFilter:"blur(6px)", lineHeight:0 }}>
+        <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
+          <path d="M11 3L5 9l6 6" stroke="#666" strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+      </button>
+
+      {/* Right controls — top-right corner chips */}
+      <div style={{ position:"absolute", top:"env(safe-area-inset-top, 8px)", right:8, zIndex:20,
+        display:"flex", gap:6 }}>
         <button onPointerDown={e=>{ e.preventDefault(); setLandscapeMode(m => !m); }}
-          title="Toggle landscape"
-          style={{ background:"none", border:`1px solid #333`, borderRadius:6, color:"#555",
-            fontSize:14, cursor:"pointer", padding:"2px 8px", fontFamily:"inherit", lineHeight:1, pointerEvents:"auto" }}>⇅</button>
-        <button onClick={resetGame} style={{ background:"none", border:`1px solid #333`,
-          borderRadius:6, color:"#555", fontSize:11, cursor:"pointer", padding:"3px 8px", fontFamily:"inherit", pointerEvents:"auto" }}>Reset</button>
+          style={{ background:"rgba(0,0,0,0.45)", border:"1px solid #333", borderRadius:6, color:"#555",
+            fontSize:13, cursor:"pointer", padding:"4px 8px", fontFamily:"inherit", lineHeight:1,
+            backdropFilter:"blur(6px)" }}>⇅</button>
+        <button onClick={resetGame}
+          style={{ background:"rgba(0,0,0,0.45)", border:"1px solid #333", borderRadius:6, color:"#555",
+            fontSize:11, cursor:"pointer", padding:"4px 8px", fontFamily:"inherit",
+            backdropFilter:"blur(6px)" }}>Reset</button>
       </div>
 
       {/* Player grid — explicit top/left/right/bottom:0 gives CSS Grid a definite height so 1fr rows fill correctly */}
